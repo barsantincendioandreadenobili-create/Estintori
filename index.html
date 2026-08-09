@@ -1,0 +1,957 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Registro Clienti · Estintori</title>
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Estintori" />
+<meta name="theme-color" content="#1C2421" />
+<link rel="apple-touch-icon" href="icon-180.png" />
+<link rel="icon" href="icon-192.png" />
+<link rel="manifest" href="manifest.json" />
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+/* ---------------- Costanti e utilità ---------------- */
+const STORAGE_INDEX = 'clienti:index';
+const TIPI = ["Polvere ABC","CO2","Schiuma","Idrico","Acqua"];
+const MONTHS_IT = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+
+const STATUS = {
+  ok:      { key:'ok',      label:'In regola',      color:'#3D6A5C', bg:'#E4EEE9' },
+  presto:  { key:'presto',  label:'In scadenza',     color:'#B9791F', bg:'#F5EAD3' },
+  scaduto: { key:'scaduto', label:'Scaduto',         color:'#B8402C', bg:'#F5E1DC' },
+  ignoto:  { key:'ignoto',  label:'Da programmare',  color:'#8B9290', bg:'#E9E9E4' },
+};
+
+function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
+function escapeHtml(str){
+  if(str===null||str===undefined) return '';
+  return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function fmtDate(iso){
+  if(!iso) return '—';
+  const d = new Date(iso+'T00:00:00');
+  if(isNaN(d)) return '—';
+  return d.toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit',year:'numeric'});
+}
+function addMonths(iso, months){
+  if(!iso) return '';
+  const d = new Date(iso+'T00:00:00');
+  d.setMonth(d.getMonth()+months);
+  return d.toISOString().slice(0,10);
+}
+function todayISO(){ return new Date().toISOString().slice(0,10); }
+function daysUntil(iso){
+  if(!iso) return null;
+  const d = new Date(iso+'T00:00:00');
+  const now = new Date(); now.setHours(0,0,0,0);
+  return Math.round((d-now)/86400000);
+}
+function statusOf(nextDate){
+  const days = daysUntil(nextDate);
+  if(days===null) return STATUS.ignoto;
+  if(days<0) return STATUS.scaduto;
+  if(days<=30) return STATUS.presto;
+  return STATUS.ok;
+}
+function cyclePairLabel(c){
+  if(!c.dataUltimaManutenzione) return '—';
+  const m1 = new Date(c.dataUltimaManutenzione+'T00:00:00').getMonth();
+  const m2 = (m1+6)%12;
+  return MONTHS_IT[m1] + ' / ' + MONTHS_IT[m2];
+}
+
+/* icone SVG inline (stroke, stile lineare) */
+const ICON_PLUS = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`;
+const ICON_PENCIL = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>`;
+const ICON_TRASH = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>`;
+const ICON_PIN = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>`;
+const ICON_CAMERA = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8a2 2 0 0 1 2-2h1l2-2h6l2 2h1a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8z"/><circle cx="12" cy="13" r="3.5"/></svg>`;
+const ICON_BACK = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>`;
+const ICON_X = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+const ICON_PRINTER = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>`;
+const ICON_FLAME = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2s5 5.5 5 10a5 5 0 0 1-10 0C7 8 12 2 12 2z"/><path d="M12 18a2.5 2.5 0 0 0 2.5-2.5c0-1-.5-1.7-1.3-2.4.1.9-.4 1.4-.7 1.4-.4 0-.7-.4-.6-1-.9.7-1.4 1.4-1.4 2C10.5 16.9 11.2 18 12 18z"/></svg>`;
+const ICON_BADGE_SRC = "data:image/jpeg;base64,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";
+
+/* ---------------- Stato ---------------- */
+const state = {
+  view: 'list',
+  clients: [],
+  detailCache: {},
+  loading: true,
+  error: '',
+  query: '',
+  filter: 'tutti',
+  currentId: null,
+  editingId: null,
+  draftApparecchi: [],
+  draftPhotos: [],
+  draftSignature: null,
+  draftLatLng: null,
+};
+
+/* ---------------- Caricamento / persistenza ---------------- */
+async function loadIndex(){
+  state.loading = true; render();
+  try{
+    const res = await window.storage.get(STORAGE_INDEX, true);
+    state.clients = res && res.value ? JSON.parse(res.value) : [];
+  }catch(e){
+    state.clients = [];
+  }
+  state.loading = false;
+  render();
+}
+
+async function persistClient(full){
+  try{
+    const setRes = await window.storage.set('cliente:'+full.id, JSON.stringify(full), true);
+    if(!setRes) throw new Error('set failed');
+    state.detailCache[full.id] = full;
+    const lightweight = {
+      id: full.id, nome: full.nome, indirizzo: full.indirizzo,
+      lat: full.lat, lng: full.lng, telefono: full.telefono, note: full.note,
+      dataUltimaManutenzione: full.dataUltimaManutenzione,
+      dataProssimaManutenzione: full.dataProssimaManutenzione,
+      apparecchi: full.apparecchi || [],
+      numApparecchi: (full.apparecchi||[]).length,
+    };
+    const idx = state.clients.findIndex(c=>c.id===full.id);
+    if(idx>=0) state.clients[idx]=lightweight; else state.clients.push(lightweight);
+    await window.storage.set(STORAGE_INDEX, JSON.stringify(state.clients), true);
+    state.error = '';
+  }catch(err){
+    state.error = 'Salvataggio non riuscito. Controlla la connessione e riprova.';
+  }
+}
+
+async function deleteClient(id){
+  if(!confirm('Eliminare questo cliente e tutti i suoi apparecchi? L\'azione non è reversibile.')) return;
+  try{ await window.storage.delete('cliente:'+id, true); }catch(e){}
+  delete state.detailCache[id];
+  state.clients = state.clients.filter(c=>c.id!==id);
+  try{ await window.storage.set(STORAGE_INDEX, JSON.stringify(state.clients), true); }catch(e){}
+  if(state.currentId===id){ state.currentId=null; state.view='list'; }
+  render();
+}
+
+async function fetchDetailAndRerender(id){
+  try{
+    const res = await window.storage.get('cliente:'+id, true);
+    state.detailCache[id] = res && res.value ? JSON.parse(res.value) : {id, nome:'(scheda non trovata)', apparecchi:[]};
+  }catch(e){
+    state.detailCache[id] = {id, nome:'(errore di caricamento)', apparecchi:[]};
+  }
+  if(state.view==='detail' && state.currentId===id) render();
+}
+
+/* ---------------- Navigazione ---------------- */
+async function openDetail(id){
+  state.currentId = id; state.view = 'detail'; render();
+  if(!state.detailCache[id]) await fetchDetailAndRerender(id);
+}
+
+async function openForm(id){
+  state.editingId = id || null;
+  state.draftPhotos = [];
+  state.draftApparecchi = [];
+  state.draftSignature = null;
+  state.draftLatLng = null;
+  if(id){
+    let detail = state.detailCache[id];
+    if(!detail){
+      try{
+        const res = await window.storage.get('cliente:'+id, true);
+        detail = res && res.value ? JSON.parse(res.value) : null;
+        if(detail) state.detailCache[id]=detail;
+      }catch(e){}
+    }
+    if(detail){
+      state.draftApparecchi = JSON.parse(JSON.stringify(detail.apparecchi||[]));
+      state.draftPhotos = JSON.parse(JSON.stringify(detail.foto||[]));
+      state.draftSignature = detail.firma || null;
+      state.draftLatLng = (detail.lat!=null && detail.lng!=null) ? {lat:detail.lat,lng:detail.lng} : null;
+    }
+  }
+  state.view = 'form';
+  render();
+}
+
+function setFilter(k){ state.filter = state.filter===k ? 'tutti' : k; updateListDynamic(); }
+function handleSearchInput(v){ state.query = v; updateListDynamic(); }
+
+/* ---------------- Geocodifica (OpenStreetMap Nominatim) ---------------- */
+async function geocodeIndirizzo(){
+  const indirizzo = document.getElementById('f-indirizzo').value.trim();
+  if(!indirizzo){ setGeocodeStatus('Inserisci prima un indirizzo.', true); return; }
+  setGeocodeStatus('Ricerca posizione in corso…', false);
+  try{
+    const res = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(indirizzo));
+    const data = await res.json();
+    if(data && data[0]){
+      state.draftLatLng = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+      setGeocodeStatus('Posizione trovata sulla mappa.', false);
+    }else{
+      setGeocodeStatus('Indirizzo non trovato. Puoi salvare comunque, ma non comparirà sulla mappa.', true);
+    }
+  }catch(e){
+    setGeocodeStatus('Geocodifica non riuscita (verifica la connessione).', true);
+  }
+}
+function setGeocodeStatus(msg, isError){
+  const el = document.getElementById('geocode-status');
+  if(el){ el.textContent = msg; el.style.color = isError ? 'var(--red)' : 'var(--steel)'; }
+}
+
+/* ---------------- Apparecchi (estintori / altro) ---------------- */
+function addApparecchio(categoria){
+  state.draftApparecchi.push({
+    id: uid(), categoria,
+    tipo: categoria==='estintore' ? TIPI[0] : '',
+    matricola:'', capacita:'', posizione:'', annoProduzione:'', annoRevisione:'', annoScadenza:'', nome:'', note:''
+  });
+  renderApparecchiList();
+}
+function removeApparecchio(id){
+  state.draftApparecchi = state.draftApparecchi.filter(a=>a.id!==id);
+  renderApparecchiList();
+}
+function updateApparecchio(id, field, value){
+  const a = state.draftApparecchi.find(x=>x.id===id);
+  if(a) a[field]=value;
+}
+function yearOptions(selected){
+  const y = new Date().getFullYear();
+  let opts = '<option value="">—</option>';
+  for(let i=y-20;i<=y+15;i++){
+    opts += `<option value="${i}" ${String(selected)===String(i)?'selected':''}>${i}</option>`;
+  }
+  return opts;
+}
+function apparecchioEstintoreRow(a){
+  return `<div class="app-row">
+    <div class="app-row-badge" style="background:var(--teal-bg);color:var(--teal)">Estintore</div>
+    <div class="app-row-fields">
+      <div class="app-field">
+        <label>Tipo</label>
+        <select onchange="updateApparecchio('${a.id}','tipo',this.value)">
+          ${TIPI.map(t=>`<option value="${t}" ${a.tipo===t?'selected':''}>${t}</option>`).join('')}
+        </select>
+      </div>
+      <div class="app-field">
+        <label>Anno produzione</label>
+        <select onchange="updateApparecchio('${a.id}','annoProduzione',this.value)">${yearOptions(a.annoProduzione)}</select>
+      </div>
+      <div class="app-field">
+        <label>Matricola</label>
+        <input placeholder="es. EST-0142" value="${escapeHtml(a.matricola)}" oninput="updateApparecchio('${a.id}','matricola',this.value)" />
+      </div>
+      <div class="app-field">
+        <label>Capacità</label>
+        <input placeholder="es. 6 kg" value="${escapeHtml(a.capacita)}" oninput="updateApparecchio('${a.id}','capacita',this.value)" />
+      </div>
+      <div class="app-field app-field-highlight amber">
+        <label>Anno revisione</label>
+        <select onchange="updateApparecchio('${a.id}','annoRevisione',this.value)">${yearOptions(a.annoRevisione)}</select>
+      </div>
+      <div class="app-field app-field-highlight red">
+        <label>Anno scadenza</label>
+        <select onchange="updateApparecchio('${a.id}','annoScadenza',this.value)">${yearOptions(a.annoScadenza)}</select>
+      </div>
+      <div class="app-field" style="grid-column:1/-1">
+        <label>Posizione</label>
+        <input placeholder="es. corridoio piano 1" value="${escapeHtml(a.posizione)}" oninput="updateApparecchio('${a.id}','posizione',this.value)" />
+      </div>
+    </div>
+    <button type="button" class="row-remove" onclick="removeApparecchio('${a.id}')" title="Rimuovi">${ICON_X}</button>
+  </div>`;
+}
+function apparecchioAltroRow(a){
+  return `<div class="app-row">
+    <div class="app-row-badge" style="background:var(--amber-bg);color:var(--amber)">Altro</div>
+    <div class="app-row-fields">
+      <div class="app-field">
+        <label>Nome elemento</label>
+        <input placeholder="es. Porta REI" value="${escapeHtml(a.nome)}" oninput="updateApparecchio('${a.id}','nome',this.value)" />
+      </div>
+      <div class="app-field">
+        <label>Nota</label>
+        <input placeholder="Nota" value="${escapeHtml(a.note)}" oninput="updateApparecchio('${a.id}','note',this.value)" />
+      </div>
+    </div>
+    <button type="button" class="row-remove" onclick="removeApparecchio('${a.id}')" title="Rimuovi">${ICON_X}</button>
+  </div>`;
+}
+function renderApparecchiList(){
+  const el = document.getElementById('apparecchi-list');
+  if(!el) return;
+  el.innerHTML = state.draftApparecchi.length
+    ? state.draftApparecchi.map(a => a.categoria==='estintore' ? apparecchioEstintoreRow(a) : apparecchioAltroRow(a)).join('')
+    : '<p class="empty-hint-sm">Nessun apparecchio aggiunto. Usa i pulsanti sopra per aggiungere un estintore o un altro elemento (es. porta REI).</p>';
+}
+
+/* ---------------- Foto ---------------- */
+function compressImage(file, maxW=900, quality=0.6){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        let w = img.width, h = img.height;
+        if(w > maxW){ h = Math.round(h*maxW/w); w = maxW; }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+async function handlePhotoUpload(input){
+  const files = Array.from(input.files || []);
+  for(const f of files){
+    if(state.draftPhotos.length >= 6){ alert('Massimo 6 foto per cliente (per contenere lo spazio di archiviazione condiviso).'); break; }
+    try{ const dataUrl = await compressImage(f); state.draftPhotos.push({id:uid(), dataUrl}); }catch(e){}
+  }
+  input.value = '';
+  renderPhotosList();
+}
+function removePhoto(id){ state.draftPhotos = state.draftPhotos.filter(p=>p.id!==id); renderPhotosList(); }
+function renderPhotosList(){
+  const el = document.getElementById('photos-list');
+  if(!el) return;
+  el.innerHTML = state.draftPhotos.map(p => `
+    <div class="photo-thumb">
+      <img src="${p.dataUrl}" alt="foto cliente" />
+      <button type="button" onclick="removePhoto('${p.id}')" aria-label="Rimuovi foto">×</button>
+    </div>`).join('') || '<p class="empty-hint-sm">Nessuna foto aggiunta.</p>';
+}
+
+/* ---------------- Firma ---------------- */
+let sigCtx=null, sigDrawing=false, sigLast=null;
+function initSignaturePad(){
+  const canvas = document.getElementById('sig-canvas');
+  if(!canvas) return;
+  sigCtx = canvas.getContext('2d');
+  sigCtx.lineWidth = 2.2; sigCtx.lineCap='round'; sigCtx.strokeStyle = '#1C2321';
+  if(state.draftSignature){
+    const img = new Image();
+    img.onload = () => sigCtx.drawImage(img,0,0,canvas.width,canvas.height);
+    img.src = state.draftSignature;
+  }
+  function pos(e){
+    const r = canvas.getBoundingClientRect();
+    const p = e.touches ? e.touches[0] : e;
+    return { x: (p.clientX-r.left) * (canvas.width/r.width), y: (p.clientY-r.top) * (canvas.height/r.height) };
+  }
+  function start(e){ sigDrawing=true; sigLast=pos(e); e.preventDefault(); }
+  function move(e){
+    if(!sigDrawing) return;
+    const p = pos(e);
+    sigCtx.beginPath(); sigCtx.moveTo(sigLast.x, sigLast.y); sigCtx.lineTo(p.x, p.y); sigCtx.stroke();
+    sigLast = p; e.preventDefault();
+  }
+  function end(){ if(sigDrawing){ sigDrawing=false; state.draftSignature = canvas.toDataURL('image/png'); } }
+  canvas.onmousedown = start; canvas.onmousemove = move; window.addEventListener('mouseup', end);
+  canvas.ontouchstart = start; canvas.ontouchmove = move; canvas.ontouchend = end;
+}
+function clearSignature(){
+  const canvas = document.getElementById('sig-canvas');
+  if(canvas && sigCtx) sigCtx.clearRect(0,0,canvas.width,canvas.height);
+  state.draftSignature = null;
+}
+
+/* ---------------- Salvataggio scheda cliente ---------------- */
+function autoNextDate(){
+  const ultima = document.getElementById('f-ultima').value;
+  const prossimaEl = document.getElementById('f-prossima');
+  if(ultima && !prossimaEl.value) prossimaEl.value = addMonths(ultima, 6);
+}
+async function saveClientForm(e){
+  e.preventDefault();
+  const nome = document.getElementById('f-nome').value.trim();
+  if(!nome){ alert('Inserisci il nome del cliente.'); return; }
+  const id = state.editingId || uid();
+  const prevLat = state.detailCache[id] ? state.detailCache[id].lat : null;
+  const prevLng = state.detailCache[id] ? state.detailCache[id].lng : null;
+  const full = {
+    id, nome,
+    indirizzo: document.getElementById('f-indirizzo').value.trim(),
+    telefono: document.getElementById('f-telefono').value.trim(),
+    note: document.getElementById('f-note').value.trim(),
+    dataUltimaManutenzione: document.getElementById('f-ultima').value,
+    dataProssimaManutenzione: document.getElementById('f-prossima').value,
+    lat: state.draftLatLng ? state.draftLatLng.lat : prevLat,
+    lng: state.draftLatLng ? state.draftLatLng.lng : prevLng,
+    apparecchi: state.draftApparecchi,
+    foto: state.draftPhotos,
+    firma: state.draftSignature,
+    firmaData: state.draftSignature ? todayISO() : (state.detailCache[id] ? state.detailCache[id].firmaData : null),
+  };
+  await persistClient(full);
+  state.view = 'detail';
+  state.currentId = id;
+  render();
+}
+
+/* ---------------- Generazione PDF ---------------- */
+function generatePDF(id){
+  const c = state.detailCache[id];
+  if(!c){ alert('Apri prima la scheda del cliente.'); return; }
+  if(typeof window.jspdf === 'undefined'){ alert('Libreria PDF non disponibile: verifica la connessione e riprova.'); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit:'mm', format:'a4' });
+  const marginX = 16, maxW = 178;
+  let y = 20;
+
+  doc.setFont('helvetica','bold'); doc.setFontSize(16);
+  doc.text('Scheda cliente — Manutenzione estintori', marginX, y); y += 8;
+  doc.setDrawColor(210); doc.line(marginX, y, 194, y); y += 8;
+
+  doc.setFontSize(13); doc.setFont('helvetica','bold');
+  doc.text(c.nome || '—', marginX, y); y += 6;
+  doc.setFont('helvetica','normal'); doc.setFontSize(10);
+  [
+    'Indirizzo: ' + (c.indirizzo || '—'),
+    'Telefono: ' + (c.telefono || '—'),
+    'Ultima manutenzione: ' + fmtDate(c.dataUltimaManutenzione),
+    'Prossima manutenzione: ' + fmtDate(c.dataProssimaManutenzione),
+    'Ciclo mensile: ' + cyclePairLabel(c),
+  ].forEach(line => { doc.text(line, marginX, y); y += 5.2; });
+  y += 3;
+
+  const estintori = (c.apparecchi||[]).filter(a=>a.categoria==='estintore');
+  const altro = (c.apparecchi||[]).filter(a=>a.categoria==='altro');
+
+  doc.setFont('helvetica','bold'); doc.text('Estintori', marginX, y); y += 6;
+  doc.setFont('helvetica','normal');
+  if(estintori.length===0){ doc.text('Nessuno registrato.', marginX, y); y += 6; }
+  estintori.forEach(a=>{
+    const line = '• ' + (a.tipo||'') + ' — ' + (a.matricola||'s.n.') + ' — ' + (a.posizione||'') + (a.capacita? ' ('+a.capacita+')':'')
+      + (a.annoProduzione? ' — produzione '+a.annoProduzione:'') + (a.annoRevisione? ' — revisione '+a.annoRevisione:'') + (a.annoScadenza? ' — scadenza '+a.annoScadenza:'');
+    const lines = doc.splitTextToSize(line, maxW);
+    if(y + lines.length*5 > 275){ doc.addPage(); y=20; }
+    doc.text(lines, marginX, y); y += lines.length*5 + 1;
+  });
+  y += 3;
+
+  doc.setFont('helvetica','bold'); doc.text('Altro', marginX, y); y += 6;
+  doc.setFont('helvetica','normal');
+  if(altro.length===0){ doc.text('Nessun elemento registrato.', marginX, y); y += 6; }
+  altro.forEach(a=>{
+    const line = '• ' + (a.nome||'') + ' — ' + (a.note||'');
+    const lines = doc.splitTextToSize(line, maxW);
+    if(y + lines.length*5 > 275){ doc.addPage(); y=20; }
+    doc.text(lines, marginX, y); y += lines.length*5 + 1;
+  });
+  y += 3;
+
+  if(c.note){
+    if(y > 260){ doc.addPage(); y=20; }
+    doc.setFont('helvetica','bold'); doc.text('Note', marginX, y); y += 6;
+    doc.setFont('helvetica','normal');
+    const lines = doc.splitTextToSize(c.note, maxW);
+    doc.text(lines, marginX, y); y += lines.length*5 + 4;
+  }
+
+  if(c.foto && c.foto.length){
+    if(y > 220) { doc.addPage(); y=20; }
+    doc.setFont('helvetica','bold'); doc.text('Foto', marginX, y); y += 6;
+    let x = marginX;
+    c.foto.slice(0,6).forEach((p, idx) => {
+      try{ doc.addImage(p.dataUrl, 'JPEG', x, y, 40, 30); }catch(e){}
+      x += 44;
+      if((idx+1)%4===0){ x = marginX; y += 34; }
+    });
+    y += 36;
+  }
+
+  if(y > 250){ doc.addPage(); y=20; }
+  doc.setFont('helvetica','bold'); doc.text('Firma cliente', marginX, y); y += 6;
+  if(c.firma){
+    try{ doc.addImage(c.firma, 'PNG', marginX, y, 60, 20); }catch(e){}
+    y += 24;
+    doc.setFont('helvetica','normal'); doc.setFontSize(9);
+    doc.text('Firmato il ' + fmtDate(c.firmaData), marginX, y);
+  }else{
+    doc.setFont('helvetica','normal');
+    doc.text('Non firmato.', marginX, y);
+  }
+
+  const fname = 'scheda-' + (c.nome||'cliente').toLowerCase().replace(/[^a-z0-9]+/g,'-') + '.pdf';
+  const blob = doc.output('blob');
+  const file = new File([blob], fname, { type: 'application/pdf' });
+  if(navigator.canShare && navigator.canShare({ files:[file] })){
+    navigator.share({
+      files: [file],
+      title: 'Scheda cliente – ' + (c.nome||''),
+      text: 'Scheda manutenzione estintori: ' + (c.nome||''),
+    }).catch(()=>{ doc.save(fname); });
+  } else {
+    doc.save(fname);
+  }
+}
+
+function generateFullPDF(){
+  if(state.clients.length===0){ alert('Non ci sono ancora clienti da stampare.'); return; }
+  if(typeof window.jspdf === 'undefined'){ alert('Libreria PDF non disponibile: verifica la connessione e riprova.'); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit:'mm', format:'a4' });
+  const marginX = 16, maxW = 178;
+  const sorted = [...state.clients].sort((a,b) => (a.nome||'').localeCompare(b.nome||''));
+  const oggi = fmtDate(todayISO());
+
+  doc.setFont('helvetica','bold'); doc.setFontSize(18);
+  doc.text('Registro Clienti — Estintori', marginX, 30);
+  doc.setFont('helvetica','normal'); doc.setFontSize(11);
+  doc.text('Backup cartaceo completo — generato il ' + oggi, marginX, 40);
+  doc.text('Totale clienti: ' + sorted.length, marginX, 48);
+
+  sorted.forEach((c, i) => {
+    doc.addPage();
+    let y = 20;
+    doc.setFont('helvetica','bold'); doc.setFontSize(15);
+    doc.text((i+1) + '. ' + (c.nome || '—'), marginX, y); y += 8;
+    doc.setDrawColor(210); doc.line(marginX, y, 194, y); y += 8;
+    doc.setFont('helvetica','normal'); doc.setFontSize(10);
+    [
+      'Indirizzo: ' + (c.indirizzo || '—'),
+      'Telefono: ' + (c.telefono || '—'),
+      'Ultima manutenzione: ' + fmtDate(c.dataUltimaManutenzione),
+      'Prossima manutenzione: ' + fmtDate(c.dataProssimaManutenzione),
+      'Ciclo mensile: ' + cyclePairLabel(c),
+    ].forEach(line => { doc.text(line, marginX, y); y += 5.2; });
+    y += 3;
+
+    const estintori = (c.apparecchi||[]).filter(a=>a.categoria==='estintore');
+    const altro = (c.apparecchi||[]).filter(a=>a.categoria==='altro');
+
+    doc.setFont('helvetica','bold'); doc.text('Estintori', marginX, y); y += 6;
+    doc.setFont('helvetica','normal');
+    if(estintori.length===0){ doc.text('Nessuno registrato.', marginX, y); y += 6; }
+    estintori.forEach(a=>{
+      const line = '• ' + (a.tipo||'') + ' — ' + (a.matricola||'s.n.') + ' — ' + (a.posizione||'') + (a.capacita? ' ('+a.capacita+')':'')
+        + (a.annoProduzione? ' — produzione '+a.annoProduzione:'') + (a.annoRevisione? ' — revisione '+a.annoRevisione:'') + (a.annoScadenza? ' — scadenza '+a.annoScadenza:'');
+      const lines = doc.splitTextToSize(line, maxW);
+      if(y + lines.length*5 > 275){ doc.addPage(); y=20; }
+      doc.text(lines, marginX, y); y += lines.length*5 + 1;
+    });
+    y += 3;
+
+    doc.setFont('helvetica','bold'); doc.text('Altro', marginX, y); y += 6;
+    doc.setFont('helvetica','normal');
+    if(altro.length===0){ doc.text('Nessun elemento registrato.', marginX, y); y += 6; }
+    altro.forEach(a=>{
+      const line = '• ' + (a.nome||'') + ' — ' + (a.note||'');
+      const lines = doc.splitTextToSize(line, maxW);
+      if(y + lines.length*5 > 275){ doc.addPage(); y=20; }
+      doc.text(lines, marginX, y); y += lines.length*5 + 1;
+    });
+
+    if(c.note){
+      y += 3;
+      if(y > 260){ doc.addPage(); y = 20; }
+      doc.setFont('helvetica','bold'); doc.text('Note', marginX, y); y += 6;
+      doc.setFont('helvetica','normal');
+      const lines = doc.splitTextToSize(c.note, maxW);
+      doc.text(lines, marginX, y); y += lines.length*5;
+    }
+  });
+
+  const fname = 'registro-clienti-completo-' + todayISO() + '.pdf';
+  const blob = doc.output('blob');
+  const file = new File([blob], fname, { type:'application/pdf' });
+  if(navigator.canShare && navigator.canShare({ files:[file] })){
+    navigator.share({ files:[file], title:'Registro clienti completo', text:'Backup cartaceo di tutti i clienti' }).catch(()=>{ doc.save(fname); });
+  }else{
+    doc.save(fname);
+  }
+}
+
+/* ---------------- Vista: Elenco ---------------- */
+function currentYear(){ return new Date().getFullYear(); }
+function countByYearField(field, year){
+  let n = 0;
+  state.clients.forEach(c => (c.apparecchi||[]).forEach(a => {
+    if(a.categoria==='estintore' && String(a[field])===String(year)) n++;
+  }));
+  return n;
+}
+function dashTilesHtml(){
+  const y = currentYear();
+  let totEstintori = 0;
+  state.clients.forEach(c => (c.apparecchi||[]).forEach(a => { if(a.categoria==='estintore') totEstintori++; }));
+  const tiles = [
+    ['tutti','Clienti', state.clients.length, '#1C2321'],
+    ['revisione',`Da revisionare · ${y}`, countByYearField('annoRevisione', y), '#B9791F'],
+    ['scadenza',`Scadenze · ${y}`, countByYearField('annoScadenza', y), '#B8402C'],
+    ['estintori','Estintori totali', totEstintori, '#3D6A5C'],
+  ];
+  return tiles.map(([k,label,val,color]) => `
+    <button class="dash-tile ${state.filter===k?'active':''}" style="border-color:${state.filter===k?color:'var(--line)'}" onclick="setFilter('${k}')">
+      <span class="dash-num" style="color:${color}">${val||0}</span>
+      <span class="dash-label">${label}</span>
+    </button>`).join('');
+}
+function filteredClients(){
+  const y = currentYear();
+  let list = state.clients;
+  if(state.filter==='revisione'){
+    list = list.filter(c => (c.apparecchi||[]).some(a => a.categoria==='estintore' && String(a.annoRevisione)===String(y)));
+  }else if(state.filter==='scadenza'){
+    list = list.filter(c => (c.apparecchi||[]).some(a => a.categoria==='estintore' && String(a.annoScadenza)===String(y)));
+  }else if(state.filter==='estintori'){
+    list = list.filter(c => (c.apparecchi||[]).some(a => a.categoria==='estintore'));
+  }
+  if(state.query.trim()){
+    const q = state.query.trim().toLowerCase();
+    list = list.filter(c => (c.nome||'').toLowerCase().includes(q) || (c.indirizzo||'').toLowerCase().includes(q));
+  }
+  if(state.filter==='revisione' || state.filter==='scadenza'){
+    return [...list].sort((a,b) => (a.nome||'').localeCompare(b.nome||''));
+  }
+  return [...list].sort((a,b)=>{
+    const da = daysUntil(a.dataProssimaManutenzione), db = daysUntil(b.dataProssimaManutenzione);
+    if(da===null) return 1; if(db===null) return -1; return da-db;
+  });
+}
+function clientTag(c){
+  const s = statusOf(c.dataProssimaManutenzione);
+  const days = daysUntil(c.dataProssimaManutenzione);
+  let dayLabel = 'Nessuna data impostata';
+  if(days!==null){
+    if(days<0) dayLabel = `Scaduto da ${Math.abs(days)} gg`;
+    else if(days===0) dayLabel = 'Scade oggi';
+    else dayLabel = `Tra ${days} gg`;
+  }
+  let matchExtra = '';
+  if(state.filter==='revisione' || state.filter==='scadenza'){
+    const y = currentYear();
+    const field = state.filter==='revisione' ? 'annoRevisione' : 'annoScadenza';
+    const cls = state.filter==='revisione' ? 'amber' : 'red';
+    const matches = (c.apparecchi||[]).filter(a => a.categoria==='estintore' && String(a[field])===String(y));
+    if(matches.length){
+      matchExtra = `<div class="tag-match ${cls}">${matches.map(a=>escapeHtml(a.tipo||'Estintore')+(a.matricola?' · '+escapeHtml(a.matricola):'')).join('<br>')}</div>`;
+    }
+  }
+  return `
+  <div class="tag-card">
+    <div class="tag-bar" style="background:${s.color}"></div>
+    <div class="tag-hole"></div>
+    <button class="tag-main" onclick="openDetail('${c.id}')">
+      <div class="tag-top">
+        <div>
+          <p class="tag-eyebrow">${c.numApparecchi||0} apparecchi · ${cyclePairLabel(c)}</p>
+          <p class="tag-title">${escapeHtml(c.nome)}</p>
+        </div>
+        <span class="tag-status" style="background:${s.bg};color:${s.color}">${s.label}</span>
+      </div>
+      <div class="tag-addr">${ICON_PIN}<span>${escapeHtml(c.indirizzo)||'Indirizzo non indicato'}</span></div>
+    </button>
+    ${matchExtra}
+    <div class="tag-foot">
+      <div>
+        <p class="tag-date-label">Prossima manutenzione</p>
+        <p class="tag-date-val">${fmtDate(c.dataProssimaManutenzione)} <span style="color:${s.color}">· ${dayLabel}</span></p>
+      </div>
+      <div class="tag-actions">
+        <button title="Modifica" onclick="openForm('${c.id}')">${ICON_PENCIL}</button>
+        <button title="Elimina" onclick="deleteClient('${c.id}')">${ICON_TRASH}</button>
+      </div>
+    </div>
+  </div>`;
+}
+function clientGridHtml(){
+  if(state.loading) return '<p class="empty-hint">Caricamento…</p>';
+  const list = filteredClients();
+  if(list.length===0){
+    return `<div class="empty-block">${state.clients.length===0 ? "Nessun cliente registrato. Aggiungi il primo per iniziare." : "Nessun cliente corrisponde ai filtri attuali."}</div>`;
+  }
+  return list.map(clientTag).join('');
+}
+function updateListDynamic(){
+  const dash = document.getElementById('dash-grid');
+  const grid = document.getElementById('client-grid');
+  if(dash) dash.innerHTML = dashTilesHtml();
+  if(grid) grid.innerHTML = clientGridHtml();
+}
+function renderList(){
+  return `
+    <div id="dash-grid" class="dash-grid">${dashTilesHtml()}</div>
+    <div class="search-wrap">
+      <input id="search-input" value="${escapeHtml(state.query)}" oninput="handleSearchInput(this.value)" placeholder="Cerca cliente o indirizzo…" />
+    </div>
+    <button class="btn btn-outline btn-block" onclick="generateFullPDF()" style="margin-top:10px">${ICON_PRINTER} Stampa / esporta elenco completo (backup cartaceo)</button>
+    <div id="client-grid" class="client-grid">${clientGridHtml()}</div>
+  `;
+}
+
+/* ---------------- Vista: Calendario ---------------- */
+function calClientRow(c){
+  const s = statusOf(c.dataProssimaManutenzione);
+  return `<button class="cal-row" style="border-left-color:${s.color}" onclick="openDetail('${c.id}')">
+    <span class="cal-row-name">${escapeHtml(c.nome)}</span>
+    <span class="cal-row-date">${fmtDate(c.dataProssimaManutenzione)}</span>
+  </button>`;
+}
+function renderCalendar(){
+  const buckets = Array.from({length:12}, () => []);
+  const senzaData = [];
+  state.clients.forEach(c=>{
+    if(!c.dataProssimaManutenzione){ senzaData.push(c); return; }
+    const m = new Date(c.dataProssimaManutenzione+'T00:00:00').getMonth();
+    buckets[m].push(c);
+  });
+  const months = MONTHS_IT.map((name, i) => {
+    const list = buckets[i].sort((a,b)=> a.dataProssimaManutenzione < b.dataProssimaManutenzione ? -1 : 1);
+    return `<div class="cal-month">
+      <div class="cal-month-head"><span>${name}</span><span class="cal-count">${list.length}</span></div>
+      <div class="cal-month-body">${list.length ? list.map(calClientRow).join('') : '<p class="empty-hint-sm">Nessun cliente</p>'}</div>
+    </div>`;
+  }).join('');
+  const unscheduled = senzaData.length
+    ? `<div class="cal-unscheduled"><h3>Senza data di manutenzione</h3>${senzaData.map(calClientRow).join('')}</div>`
+    : '';
+  return `<div class="cal-grid">${months}</div>${unscheduled}`;
+}
+
+/* ---------------- Vista: Mappa ---------------- */
+let leafletMap = null;
+function renderMap(){
+  return `<div id="map-container" style="height:65vh;border-radius:12px;overflow:hidden;border:1px solid var(--line);margin-top:16px;"></div>
+    <p class="map-hint">Le posizioni vengono calcolate dall'indirizzo inserito nella scheda cliente tramite geocodifica OpenStreetMap. Se un cliente non compare, apri la sua scheda, modificala e usa "Geocodifica indirizzo".</p>`;
+}
+function initMap(){
+  const container = document.getElementById('map-container');
+  if(!container || typeof L==='undefined') return;
+  if(leafletMap){ leafletMap.remove(); leafletMap=null; }
+  leafletMap = L.map('map-container').setView([42.5, 12.5], 6);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors', maxZoom: 19
+  }).addTo(leafletMap);
+  const pts = state.clients.filter(c => c.lat!=null && c.lng!=null);
+  if(pts.length===0) return;
+  const bounds = [];
+  pts.forEach(c=>{
+    const s = statusOf(c.dataProssimaManutenzione);
+    const marker = L.circleMarker([c.lat, c.lng], { radius:9, color:'#fff', weight:2, fillColor:s.color, fillOpacity:1 }).addTo(leafletMap);
+    marker.bindPopup(`<strong>${escapeHtml(c.nome)}</strong><br>${escapeHtml(c.indirizzo||'')}<br><a href="#" onclick="openDetail('${c.id}');return false;">Apri scheda</a>`);
+    bounds.push([c.lat, c.lng]);
+  });
+  if(bounds.length) leafletMap.fitBounds(bounds, { padding:[30,30] });
+}
+
+/* ---------------- Vista: Scheda cliente (dettaglio) ---------------- */
+function renderDetail(){
+  const c = state.detailCache[state.currentId];
+  if(!c) return '<p class="empty-hint">Caricamento scheda…</p>';
+  const s = statusOf(c.dataProssimaManutenzione);
+  const estintori = (c.apparecchi||[]).filter(a=>a.categoria==='estintore');
+  const altro = (c.apparecchi||[]).filter(a=>a.categoria==='altro');
+  return `
+  <div class="detail-wrap">
+    <button class="back-btn" onclick="state.view='list';render();">${ICON_BACK} Torna all'elenco</button>
+    <div class="detail-card">
+      <div class="detail-head">
+        <div>
+          <p class="eyebrow">Cliente</p>
+          <h1 class="detail-title">${escapeHtml(c.nome)}</h1>
+          <p class="detail-sub">${escapeHtml(c.indirizzo)||'Indirizzo non indicato'}</p>
+        </div>
+        <span class="status-pill" style="background:${s.bg};color:${s.color}">${s.label}</span>
+      </div>
+      <dl class="detail-grid">
+        <div><dt>Telefono</dt><dd>${escapeHtml(c.telefono)||'—'}</dd></div>
+        <div><dt>Ciclo mensile</dt><dd>${cyclePairLabel(c)}</dd></div>
+        <div><dt>Ultima manutenzione</dt><dd>${fmtDate(c.dataUltimaManutenzione)}</dd></div>
+        <div><dt>Prossima manutenzione</dt><dd style="color:${s.color};font-weight:600">${fmtDate(c.dataProssimaManutenzione)}</dd></div>
+      </dl>
+      ${c.note ? `<p class="detail-note">${escapeHtml(c.note)}</p>` : ''}
+      <div class="detail-actions">
+        <button class="btn btn-primary" onclick="openForm('${c.id}')">${ICON_PENCIL} Modifica scheda</button>
+        <button class="btn btn-outline" onclick="generatePDF('${c.id}')">Genera e invia PDF</button>
+        <button class="btn btn-danger" onclick="deleteClient('${c.id}')">${ICON_TRASH} Elimina</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Estintori (${estintori.length})</h3>
+      ${estintori.length ? `<div class="app-grid">${estintori.map(a=>{
+        const y = currentYear();
+        const revDue = a.annoRevisione && String(a.annoRevisione)===String(y);
+        const scadDue = a.annoScadenza && String(a.annoScadenza)===String(y);
+        return `
+        <div class="app-card">
+          <p class="app-type">${escapeHtml(a.tipo)}${a.annoProduzione ? ' · prod. '+escapeHtml(a.annoProduzione) : ''}</p>
+          <p class="app-matricola">${escapeHtml(a.matricola)||'Senza matricola'}</p>
+          <p class="app-pos">${escapeHtml(a.posizione)||'—'}${a.capacita ? ' · '+escapeHtml(a.capacita) : ''}</p>
+          <p class="app-years">
+            <span class="${revDue?'due amber':''}">Revisione: ${escapeHtml(a.annoRevisione)||'—'}</span>
+            <span class="${scadDue?'due red':''}">Scadenza: ${escapeHtml(a.annoScadenza)||'—'}</span>
+          </p>
+        </div>`;}).join('')}</div>` : '<p class="empty-hint-sm">Nessun estintore registrato.</p>'}
+    </div>
+
+    <div class="section">
+      <h3>Altro (${altro.length})</h3>
+      ${altro.length ? `<div class="app-grid">${altro.map(a=>`
+        <div class="app-card">
+          <p class="app-type">${escapeHtml(a.nome)||'Elemento'}</p>
+          <p class="app-pos">${escapeHtml(a.note)||'—'}</p>
+        </div>`).join('')}</div>` : '<p class="empty-hint-sm">Nessun altro elemento registrato.</p>'}
+    </div>
+
+    ${(c.foto && c.foto.length) ? `<div class="section">
+      <h3>Foto (${c.foto.length})</h3>
+      <div class="photo-grid">${c.foto.map(p=>`<img src="${p.dataUrl}" class="photo-view" alt="foto cliente" />`).join('')}</div>
+    </div>` : ''}
+
+    ${c.firma ? `<div class="section">
+      <h3>Firma cliente</h3>
+      <img src="${c.firma}" class="signature-view" alt="firma cliente" />
+      <p class="empty-hint-sm">Firmata il ${fmtDate(c.firmaData)}</p>
+    </div>` : ''}
+  </div>`;
+}
+
+/* ---------------- Vista: Form ---------------- */
+function renderForm(){
+  const editing = state.editingId ? state.detailCache[state.editingId] : null;
+  const cancelView = editing ? 'detail' : 'list';
+  return `
+  <div class="form-wrap">
+    <button class="back-btn" onclick="state.view='${cancelView}';render();">${ICON_BACK} Torna indietro</button>
+    <form id="client-form" onsubmit="saveClientForm(event)">
+      <h2 class="form-title">${editing ? 'Modifica cliente' : 'Nuovo cliente'}</h2>
+
+      <div class="field"><label>Nome cliente *</label>
+        <input id="f-nome" required value="${escapeHtml(editing?editing.nome:'')}" placeholder="es. Ristorante Da Mario" />
+      </div>
+
+      <div class="field-row">
+        <div class="field"><label>Indirizzo</label>
+          <input id="f-indirizzo" value="${escapeHtml(editing?editing.indirizzo:'')}" placeholder="Via, civico, città" />
+        </div>
+        <div class="field"><label>Telefono</label>
+          <input id="f-telefono" value="${escapeHtml(editing?editing.telefono:'')}" placeholder="Contatto" />
+        </div>
+      </div>
+      <div class="geocode-row">
+        <button type="button" class="btn btn-outline btn-sm" onclick="geocodeIndirizzo()">${ICON_PIN} Geocodifica indirizzo</button>
+        <span id="geocode-status" class="geocode-status">${state.draftLatLng ? 'Posizione già impostata.' : ''}</span>
+      </div>
+
+      <div class="field-row">
+        <div class="field"><label>Ultima manutenzione</label>
+          <input type="date" id="f-ultima" value="${editing&&editing.dataUltimaManutenzione?editing.dataUltimaManutenzione:''}" onchange="autoNextDate()" />
+        </div>
+        <div class="field"><label>Prossima manutenzione</label>
+          <input type="date" id="f-prossima" value="${editing&&editing.dataProssimaManutenzione?editing.dataProssimaManutenzione:addMonths(todayISO(),6)}" />
+        </div>
+      </div>
+
+      <div class="field"><label>Note generali</label><textarea id="f-note" rows="2">${escapeHtml(editing?editing.note:'')}</textarea></div>
+
+      <div class="apparecchi-section">
+        <div class="section-head">
+          <h3>Apparecchi</h3>
+          <div class="section-actions">
+            <button type="button" class="btn btn-sm btn-outline" onclick="addApparecchio('estintore')">${ICON_PLUS} Estintore</button>
+            <button type="button" class="btn btn-sm btn-outline" onclick="addApparecchio('altro')">${ICON_PLUS} Altro</button>
+          </div>
+        </div>
+        <div id="apparecchi-list"></div>
+      </div>
+
+      <div class="photos-section">
+        <div class="section-head"><h3>Foto</h3></div>
+        <label class="photo-upload-btn">
+          ${ICON_CAMERA} Aggiungi foto
+          <input type="file" accept="image/*" multiple onchange="handlePhotoUpload(this)" style="display:none" />
+        </label>
+        <div id="photos-list" class="photos-list"></div>
+      </div>
+
+      <div class="signature-section">
+        <div class="section-head">
+          <h3>Firma cliente</h3>
+          <button type="button" class="btn btn-sm btn-outline" onclick="clearSignature()">Cancella firma</button>
+        </div>
+        <canvas id="sig-canvas" width="500" height="160" class="sig-canvas"></canvas>
+        <p class="empty-hint-sm">Fai firmare il cliente direttamente sullo schermo del dispositivo.</p>
+      </div>
+
+      <div class="form-actions">
+        <button type="button" class="btn btn-outline" onclick="state.view='${cancelView}';render();">Annulla</button>
+        <button type="submit" class="btn btn-primary">${editing ? 'Salva modifiche' : 'Aggiungi cliente'}</button>
+      </div>
+    </form>
+  </div>`;
+}
+
+/* ---------------- Layout generale ---------------- */
+function headerHtml(){
+  return `
+  <header class="topbar">
+    <div class="topbar-inner container">
+      <div class="brand">
+        <div class="brand-badge"><img src="${ICON_BADGE_SRC}" alt="Icona estintore" /></div>
+        <div>
+          <p class="brand-title">Registro Clienti · Estintori</p>
+        </div>
+      </div>
+      ${state.view!=='form' ? `<button class="btn btn-primary btn-sm" onclick="openForm(null)">${ICON_PLUS} Nuovo cliente</button>` : ''}
+    </div>
+    ${state.view!=='form' ? `
+    <nav class="tabs container">
+      <button class="tab ${state.view==='list'?'active':''}" onclick="state.view='list';render();">Elenco</button>
+      <button class="tab ${state.view==='calendar'?'active':''}" onclick="state.view='calendar';render();">Calendario</button>
+      <button class="tab ${state.view==='map'?'active':''}" onclick="state.view='map';render();">Mappa</button>
+    </nav>` : ''}
+  </header>
+  ${state.error ? `<div class="container"><div class="error-banner">${escapeHtml(state.error)}</div></div>` : ''}
+  `;
+}
+function bodyHtml(){
+  if(state.view==='list') return `<main class="container">${renderList()}</main>`;
+  if(state.view==='calendar') return `<main class="container">${renderCalendar()}</main>`;
+  if(state.view==='map') return `<main class="container">${renderMap()}</main>`;
+  if(state.view==='form') return `<main class="container">${renderForm()}</main>`;
+  if(state.view==='detail') return `<main class="container">${renderDetail()}</main>`;
+  return '';
+}
+function render(){
+  document.getElementById('app').innerHTML = headerHtml() + bodyHtml();
+  if(state.view==='form'){
+    renderApparecchiList();
+    renderPhotosList();
+    setTimeout(initSignaturePad, 0);
+  }
+  if(state.view==='map'){
+    setTimeout(initMap, 30);
+  }
+  if(state.view==='detail' && !state.detailCache[state.currentId]){
+    fetchDetailAndRerender(state.currentId);
+  }
+}
+
+loadIndex();
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+</script>
+</body>
+</html>
