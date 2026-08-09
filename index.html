@@ -16,6 +16,8 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
 
@@ -185,8 +187,21 @@
 <div id="app"></div>
 
 <script>
+/* ---------------- Firebase ---------------- */
+const firebaseConfig = {
+  apiKey: "AIzaSyAHHooQ-u9OYY8UuPoIz5xBzNrd_2t5qdE",
+  authDomain: "clienti-estintori.firebaseapp.com",
+  projectId: "clienti-estintori",
+  storageBucket: "clienti-estintori.firebasestorage.app",
+  messagingSenderId: "931788679810",
+  appId: "1:931788679810:web:25f5a4179d493edb08e29b",
+  measurementId: "G-9CC3XG2X74"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const clientsCollection = db.collection('clienti');
+
 /* ---------------- Costanti e utilità ---------------- */
-const STORAGE_INDEX = 'clienti:index';
 const TIPI = ["Polvere ABC","CO2","Schiuma","Idrico","Acqua"];
 const MONTHS_IT = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 
@@ -251,7 +266,6 @@ const ICON_BADGE_SRC = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDA
 const state = {
   view: 'list',
   clients: [],
-  detailCache: {},
   loading: true,
   error: '',
   query: '',
@@ -264,35 +278,29 @@ const state = {
   draftLatLng: null,
 };
 
-/* ---------------- Caricamento / persistenza ---------------- */
-async function loadIndex(){
+/* ---------------- Caricamento / persistenza (Firestore) ---------------- */
+function initSync(){
   state.loading = true; render();
-  try{
-    const res = await window.storage.get(STORAGE_INDEX, true);
-    state.clients = res && res.value ? JSON.parse(res.value) : [];
-  }catch(e){
-    state.clients = [];
-  }
-  state.loading = false;
-  render();
+  clientsCollection.onSnapshot(
+    snapshot => {
+      state.clients = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      state.loading = false;
+      state.error = '';
+      render();
+    },
+    err => {
+      state.loading = false;
+      state.error = 'Errore di sincronizzazione con il database. Controlla la connessione.';
+      render();
+    }
+  );
 }
 
 async function persistClient(full){
   try{
-    const setRes = await window.storage.set('cliente:'+full.id, JSON.stringify(full), true);
-    if(!setRes) throw new Error('set failed');
-    state.detailCache[full.id] = full;
-    const lightweight = {
-      id: full.id, nome: full.nome, indirizzo: full.indirizzo,
-      lat: full.lat, lng: full.lng, telefono: full.telefono, note: full.note,
-      dataUltimaManutenzione: full.dataUltimaManutenzione,
-      dataProssimaManutenzione: full.dataProssimaManutenzione,
-      apparecchi: full.apparecchi || [],
-      numApparecchi: (full.apparecchi||[]).length,
-    };
+    await clientsCollection.doc(full.id).set(full);
     const idx = state.clients.findIndex(c=>c.id===full.id);
-    if(idx>=0) state.clients[idx]=lightweight; else state.clients.push(lightweight);
-    await window.storage.set(STORAGE_INDEX, JSON.stringify(state.clients), true);
+    if(idx>=0) state.clients[idx] = full; else state.clients.push(full);
     state.error = '';
   }catch(err){
     state.error = 'Salvataggio non riuscito. Controlla la connessione e riprova.';
@@ -301,45 +309,30 @@ async function persistClient(full){
 
 async function deleteClient(id){
   if(!confirm('Eliminare questo cliente e tutti i suoi apparecchi? L\'azione non è reversibile.')) return;
-  try{ await window.storage.delete('cliente:'+id, true); }catch(e){}
-  delete state.detailCache[id];
-  state.clients = state.clients.filter(c=>c.id!==id);
-  try{ await window.storage.set(STORAGE_INDEX, JSON.stringify(state.clients), true); }catch(e){}
+  try{
+    await clientsCollection.doc(id).delete();
+    state.clients = state.clients.filter(c=>c.id!==id);
+    state.error = '';
+  }catch(e){
+    state.error = 'Eliminazione non riuscita. Controlla la connessione e riprova.';
+  }
   if(state.currentId===id){ state.currentId=null; state.view='list'; }
   render();
 }
 
-async function fetchDetailAndRerender(id){
-  try{
-    const res = await window.storage.get('cliente:'+id, true);
-    state.detailCache[id] = res && res.value ? JSON.parse(res.value) : {id, nome:'(scheda non trovata)', apparecchi:[]};
-  }catch(e){
-    state.detailCache[id] = {id, nome:'(errore di caricamento)', apparecchi:[]};
-  }
-  if(state.view==='detail' && state.currentId===id) render();
-}
-
 /* ---------------- Navigazione ---------------- */
-async function openDetail(id){
+function openDetail(id){
   state.currentId = id; state.view = 'detail'; render();
-  if(!state.detailCache[id]) await fetchDetailAndRerender(id);
 }
 
-async function openForm(id){
+function openForm(id){
   state.editingId = id || null;
   state.draftPhotos = [];
   state.draftApparecchi = [];
   state.draftSignature = null;
   state.draftLatLng = null;
   if(id){
-    let detail = state.detailCache[id];
-    if(!detail){
-      try{
-        const res = await window.storage.get('cliente:'+id, true);
-        detail = res && res.value ? JSON.parse(res.value) : null;
-        if(detail) state.detailCache[id]=detail;
-      }catch(e){}
-    }
+    const detail = state.clients.find(c => c.id === id);
     if(detail){
       state.draftApparecchi = JSON.parse(JSON.stringify(detail.apparecchi||[]));
       state.draftPhotos = JSON.parse(JSON.stringify(detail.foto||[]));
@@ -550,8 +543,9 @@ async function saveClientForm(e){
   const nome = document.getElementById('f-nome').value.trim();
   if(!nome){ alert('Inserisci il nome del cliente.'); return; }
   const id = state.editingId || uid();
-  const prevLat = state.detailCache[id] ? state.detailCache[id].lat : null;
-  const prevLng = state.detailCache[id] ? state.detailCache[id].lng : null;
+  const existing = state.clients.find(c => c.id === id);
+  const prevLat = existing ? existing.lat : null;
+  const prevLng = existing ? existing.lng : null;
   const full = {
     id, nome,
     indirizzo: document.getElementById('f-indirizzo').value.trim(),
@@ -564,7 +558,7 @@ async function saveClientForm(e){
     apparecchi: state.draftApparecchi,
     foto: state.draftPhotos,
     firma: state.draftSignature,
-    firmaData: state.draftSignature ? todayISO() : (state.detailCache[id] ? state.detailCache[id].firmaData : null),
+    firmaData: state.draftSignature ? todayISO() : (existing ? existing.firmaData : null),
   };
   await persistClient(full);
   state.view = 'detail';
@@ -574,8 +568,8 @@ async function saveClientForm(e){
 
 /* ---------------- Generazione PDF ---------------- */
 function generatePDF(id){
-  const c = state.detailCache[id];
-  if(!c){ alert('Apri prima la scheda del cliente.'); return; }
+  const c = state.clients.find(x => x.id === id);
+  if(!c){ alert('Cliente non trovato.'); return; }
   if(typeof window.jspdf === 'undefined'){ alert('Libreria PDF non disponibile: verifica la connessione e riprova.'); return; }
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit:'mm', format:'a4' });
@@ -921,8 +915,8 @@ function initMap(){
 
 /* ---------------- Vista: Scheda cliente (dettaglio) ---------------- */
 function renderDetail(){
-  const c = state.detailCache[state.currentId];
-  if(!c) return '<p class="empty-hint">Caricamento scheda…</p>';
+  const c = state.clients.find(x => x.id === state.currentId);
+  if(!c) return '<p class="empty-hint">Cliente non trovato (potrebbe essere stato eliminato da un altro dispositivo).</p>';
   const s = statusOf(c.dataProssimaManutenzione);
   const estintori = (c.apparecchi||[]).filter(a=>a.categoria==='estintore');
   const altro = (c.apparecchi||[]).filter(a=>a.categoria==='altro');
@@ -994,7 +988,7 @@ function renderDetail(){
 
 /* ---------------- Vista: Form ---------------- */
 function renderForm(){
-  const editing = state.editingId ? state.detailCache[state.editingId] : null;
+  const editing = state.editingId ? state.clients.find(c => c.id === state.editingId) : null;
   const cancelView = editing ? 'detail' : 'list';
   return `
   <div class="form-wrap">
@@ -1108,12 +1102,9 @@ function render(){
   if(state.view==='map'){
     setTimeout(initMap, 30);
   }
-  if(state.view==='detail' && !state.detailCache[state.currentId]){
-    fetchDetailAndRerender(state.currentId);
-  }
 }
 
-loadIndex();
+initSync();
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
