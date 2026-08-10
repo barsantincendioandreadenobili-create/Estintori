@@ -1,4 +1,4 @@
-const CACHE_NAME = 'registro-estintori-v10';
+const CACHE_NAME = 'registro-estintori-v11';
 const APP_URLS = [
   './manifest.json',
   './icon-180.png',
