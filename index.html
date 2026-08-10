@@ -115,6 +115,9 @@
   .cal-unscheduled h3{font-family:'Oswald',sans-serif;font-size:14px;margin:0 0 8px}
 
   .map-hint{font-size:12px;color:var(--steel);margin-top:10px;line-height:1.5}
+  .month-chip-row{display:flex;gap:6px;overflow-x:auto;padding:2px 2px 4px;margin-top:14px;-webkit-overflow-scrolling:touch}
+  .month-chip{flex:none;border:1px solid var(--line);background:#fff;color:var(--ink-soft);font-size:12.5px;font-weight:600;padding:7px 12px;border-radius:999px;white-space:nowrap}
+  .month-chip.active{background:var(--ink);color:#fff;border-color:var(--ink)}
 
   .form-wrap{max-width:680px;margin:0 auto;padding-bottom:60px}
   .back-btn{display:inline-flex;align-items:center;gap:4px;background:none;border:none;color:var(--ink-soft);font-size:13px;margin:14px 0}
@@ -209,6 +212,7 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const clientsCollection = db.collection('clienti');
+const OPENCAGE_API_KEY = 'cd29616574b14d1f98e8595e5c5ab08f';
 
 /* ---------------- Costanti e utilità ---------------- */
 const TIPI = ["Polvere ABC","CO2","Schiuma","Idrico","Acqua"];
@@ -307,6 +311,7 @@ const state = {
   draftSignature: null,
   draftLatLng: null,
   focusClientId: null,
+  mapMonthFilter: null,
 };
 
 /* ---------------- Caricamento / persistenza (Firestore) ---------------- */
@@ -387,11 +392,12 @@ async function geocodeIndirizzo(){
   if(!indirizzo){ setGeocodeStatus('Inserisci prima un indirizzo.', true); return; }
   setGeocodeStatus('Ricerca posizione in corso…', false);
   try{
-    const res = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=it&q='+encodeURIComponent(indirizzo));
+    const res = await fetch('https://api.opencagedata.com/geocode/v1/json?key='+OPENCAGE_API_KEY+'&countrycode=it&limit=1&q='+encodeURIComponent(indirizzo));
     const data = await res.json();
-    if(data && data[0]){
-      state.draftLatLng = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
-      setGeocodeStatus('Posizione trovata sulla mappa.', false);
+    if(data && data.results && data.results[0]){
+      const r = data.results[0];
+      state.draftLatLng = { lat: r.geometry.lat, lng: r.geometry.lng };
+      setGeocodeStatus('Posizione trovata: ' + r.formatted, false);
     }else{
       setGeocodeStatus('Indirizzo non trovato. Puoi salvare comunque, ma non comparirà sulla mappa.', true);
     }
@@ -405,11 +411,12 @@ function setGeocodeStatus(msg, isError){
 }
 function autoGeocodeInBackground(id, indirizzo){
   if(!indirizzo) return;
-  fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=it&q='+encodeURIComponent(indirizzo))
+  fetch('https://api.opencagedata.com/geocode/v1/json?key='+OPENCAGE_API_KEY+'&countrycode=it&limit=1&q='+encodeURIComponent(indirizzo))
     .then(res => res.json())
     .then(data => {
-      if(!data || !data[0]) return;
-      const lat = parseFloat(data[0].lat), lng = parseFloat(data[0].lon);
+      if(!data || !data.results || !data.results[0]) return;
+      const r = data.results[0];
+      const lat = r.geometry.lat, lng = r.geometry.lng;
       const c = state.clients.find(x => x.id === id);
       if(!c) return;
       c.lat = lat; c.lng = lng;
@@ -933,8 +940,16 @@ function renderCalendar(){
 /* ---------------- Vista: Mappa ---------------- */
 let leafletMap = null;
 function renderMap(){
-  return `<div id="map-container" style="height:65vh;border-radius:12px;overflow:hidden;border:1px solid var(--line);margin-top:16px;"></div>
-    <p class="map-hint">Le posizioni vengono calcolate dall'indirizzo inserito nella scheda cliente tramite geocodifica OpenStreetMap. Se un cliente non compare, apri la sua scheda, modificala e usa "Geocodifica indirizzo".</p>`;
+  const y = currentYear();
+  const monthButtons = MONTHS_IT.map((name,i) => `
+    <button class="month-chip ${state.mapMonthFilter===i?'active':''}" onclick="setMapMonthFilter(${i})">${name.slice(0,3)}</button>`).join('');
+  return `
+    <div class="month-chip-row">
+      <button class="month-chip ${state.mapMonthFilter===null?'active':''}" onclick="setMapMonthFilter(null)">Tutti</button>
+      ${monthButtons}
+    </div>
+    <div id="map-container" style="height:60vh;border-radius:12px;overflow:hidden;border:1px solid var(--line);margin-top:10px;"></div>
+    <p class="map-hint">Le posizioni vengono calcolate dall'indirizzo inserito nella scheda cliente tramite geocodifica OpenCage. Se un pallino è nel posto sbagliato, <strong>tienilo premuto e trascinalo</strong> nella posizione corretta: si salva da solo. Il filtro sopra mostra solo i clienti con prossima manutenzione in quel mese (anno ${y}).</p>`;
 }
 function statusDivIcon(color){
   return L.divIcon({
@@ -945,6 +960,15 @@ function statusDivIcon(color){
     popupAnchor: [0,-10],
   });
 }
+function setMapMonthFilter(m){
+  state.mapMonthFilter = m;
+  render();
+}
+function updateClientLatLng(id, lat, lng){
+  const c = state.clients.find(x=>x.id===id);
+  if(c){ c.lat = lat; c.lng = lng; }
+  clientsCollection.doc(id).update({ lat, lng }).catch(()=>{});
+}
 function initMap(){
   const container = document.getElementById('map-container');
   if(!container || typeof L==='undefined') return;
@@ -953,17 +977,26 @@ function initMap(){
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; OpenStreetMap contributors', maxZoom: 19
   }).addTo(leafletMap);
-  const pts = state.clients.filter(c => c.lat!=null && c.lng!=null);
+  let pts = state.clients.filter(c => c.lat!=null && c.lng!=null);
+  if(state.mapMonthFilter!==null){
+    pts = pts.filter(c => c.dataProssimaManutenzione && new Date(c.dataProssimaManutenzione+'T00:00:00').getMonth()===state.mapMonthFilter);
+  }
   if(pts.length===0) return;
   const bounds = [];
   const markersById = {};
   pts.forEach(c=>{
     const s = clientOverallStatus(c);
-    const marker = L.marker([c.lat, c.lng], { icon: statusDivIcon(s.color) }).addTo(leafletMap);
+    const marker = L.marker([c.lat, c.lng], { icon: statusDivIcon(s.color), draggable: true }).addTo(leafletMap);
     const navUrl = googleMapsUrl(c);
     marker.bindPopup(`<strong>${escapeHtml(c.nome)}</strong><br>${escapeHtml(c.indirizzo||'')}<br>
       <a href="#" onclick="openDetail('${c.id}');return false;">Apri scheda</a>
-      ${navUrl ? ` · <a href="${navUrl}" target="_blank" rel="noopener">Naviga (Google Maps)</a>` : ''}`);
+      ${navUrl ? ` · <a href="${navUrl}" target="_blank" rel="noopener">Naviga (Google Maps)</a>` : ''}
+      <br><span style="font-size:11px;color:#8B9290">Tieni premuto e trascina per correggere la posizione</span>`);
+    marker.on('dragend', () => {
+      const pos = marker.getLatLng();
+      updateClientLatLng(c.id, pos.lat, pos.lng);
+      marker.bindPopup(`<strong>${escapeHtml(c.nome)}</strong><br>Posizione aggiornata ✓`).openPopup();
+    });
     markersById[c.id] = marker;
     bounds.push([c.lat, c.lng]);
   });
@@ -982,6 +1015,7 @@ function openOnMap(id){
     alert('Nessuna posizione salvata per questo cliente ancora. Riprova tra poco (la geocodifica automatica può richiedere qualche secondo) oppure apri "Modifica scheda" e usa "Verifica posizione ora".');
     return;
   }
+  state.mapMonthFilter = null;
   state.focusClientId = id;
   state.view = 'map';
   render();
@@ -1146,7 +1180,7 @@ function headerHtml(){
       <div class="brand">
         <div class="brand-badge"><img src="${ICON_BADGE_SRC}" alt="Icona estintore" /></div>
         <div>
-          <p class="brand-title">Registro Clienti · Estintori <span style="font-size:10px;color:var(--steel);font-weight:400">build 11</span></p>
+          <p class="brand-title">Registro Clienti · Estintori <span style="font-size:10px;color:var(--steel);font-weight:400">build 13</span></p>
         </div>
       </div>
       ${state.view!=='form' ? `<button class="btn btn-primary btn-sm" onclick="openForm(null)">${ICON_PLUS} Nuovo cliente</button>` : ''}
