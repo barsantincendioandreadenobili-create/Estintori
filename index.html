@@ -316,17 +316,18 @@ function initSync(){
   );
 }
 
-async function persistClient(full){
-  try{
-    const writePromise = clientsCollection.doc(full.id).set(full);
-    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT: nessuna risposta da Firestore entro 10 secondi (verifica connessione e regole di sicurezza del database)')), 10000));
-    await Promise.race([writePromise, timeoutPromise]);
-    const idx = state.clients.findIndex(c=>c.id===full.id);
-    if(idx>=0) state.clients[idx] = full; else state.clients.push(full);
-    state.error = '';
-  }catch(err){
-    state.error = 'Salvataggio non riuscito: ' + (err && err.message ? err.message : String(err));
-  }
+function persistClient(full){
+  // Aggiornamento locale immediato: l'interfaccia non aspetta la rete.
+  const idx = state.clients.findIndex(c=>c.id===full.id);
+  if(idx>=0) state.clients[idx] = full; else state.clients.push(full);
+  state.error = '';
+  // L'invio al database avviene in background; onSnapshot riconcilierà
+  // automaticamente quando il server conferma. Se fallisce davvero
+  // (non solo lento), l'errore comparirà appena disponibile.
+  clientsCollection.doc(full.id).set(full).catch(err => {
+    state.error = 'Sincronizzazione non riuscita: ' + (err && err.message ? err.message : String(err)) + ' — il dato resta solo su questo dispositivo finché non si risincronizza.';
+    render();
+  });
 }
 
 async function deleteClient(id){
@@ -586,7 +587,7 @@ async function saveClientForm(e){
       firma: state.draftSignature,
       firmaData: state.draftSignature ? todayISO() : (existing ? existing.firmaData : null),
     };
-    await persistClient(full);
+    persistClient(full);
     state.view = 'list';
     state.editingId = null;
     render();
@@ -1081,7 +1082,7 @@ function headerHtml(){
       <div class="brand">
         <div class="brand-badge"><img src="${ICON_BADGE_SRC}" alt="Icona estintore" /></div>
         <div>
-          <p class="brand-title">Registro Clienti · Estintori <span style="font-size:10px;color:var(--steel);font-weight:400">build 8</span></p>
+          <p class="brand-title">Registro Clienti · Estintori <span style="font-size:10px;color:var(--steel);font-weight:400">build 9</span></p>
         </div>
       </div>
       ${state.view!=='form' ? `<button class="btn btn-primary btn-sm" onclick="openForm(null)">${ICON_PLUS} Nuovo cliente</button>` : ''}
