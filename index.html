@@ -211,6 +211,10 @@ const firebaseConfig = {
 };
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
+db.enablePersistence({ synchronizeTabs: true }).catch(err => {
+  // 'failed-precondition' = più schede aperte contemporaneamente, 'unimplemented' = browser non supportato.
+  // In questi casi l'app funziona comunque, solo senza la coda offline solida.
+});
 const clientsCollection = db.collection('clienti');
 const OPENCAGE_API_KEY = 'cd29616574b14d1f98e8595e5c5ab08f';
 
@@ -1180,7 +1184,7 @@ function headerHtml(){
       <div class="brand">
         <div class="brand-badge"><img src="${ICON_BADGE_SRC}" alt="Icona estintore" /></div>
         <div>
-          <p class="brand-title">Registro Clienti · Estintori <span style="font-size:10px;color:var(--steel);font-weight:400">build 13</span></p>
+          <p class="brand-title">Registro Clienti · Estintori <span style="font-size:10px;color:var(--steel);font-weight:400">build 14</span></p>
         </div>
       </div>
       ${state.view!=='form' ? `<button class="btn btn-primary btn-sm" onclick="openForm(null)">${ICON_PLUS} Nuovo cliente</button>` : ''}
