@@ -1077,7 +1077,7 @@ function headerHtml(){
       <div class="brand">
         <div class="brand-badge"><img src="${ICON_BADGE_SRC}" alt="Icona estintore" /></div>
         <div>
-          <p class="brand-title">Registro Clienti · Estintori <span style="font-size:10px;color:var(--steel);font-weight:400">build 6</span></p>
+          <p class="brand-title">Registro Clienti · Estintori <span style="font-size:10px;color:var(--steel);font-weight:400">build 7</span></p>
         </div>
       </div>
       ${state.view!=='form' ? `<button class="btn btn-primary btn-sm" onclick="openForm(null)">${ICON_PLUS} Nuovo cliente</button>` : ''}
@@ -1101,14 +1101,22 @@ function bodyHtml(){
   return '';
 }
 function render(){
-  document.getElementById('app').innerHTML = headerHtml() + bodyHtml();
-  if(state.view==='form'){
-    renderApparecchiList();
-    renderPhotosList();
-    setTimeout(initSignaturePad, 0);
-  }
-  if(state.view==='map'){
-    setTimeout(initMap, 30);
+  try{
+    document.getElementById('app').innerHTML = headerHtml() + bodyHtml();
+    if(state.view==='form'){
+      renderApparecchiList();
+      renderPhotosList();
+      setTimeout(initSignaturePad, 0);
+    }
+    if(state.view==='map'){
+      setTimeout(initMap, 30);
+    }
+  }catch(err){
+    const app = document.getElementById('app');
+    const details = (err && err.stack) ? err.stack : String(err);
+    if(app){
+      app.innerHTML = '<div style="padding:20px;font-family:monospace;white-space:pre-wrap;font-size:12px;background:#fdeceb;color:#8a2c1f;min-height:100vh;">ERRORE DI VISUALIZZAZIONE\n\nFai uno screenshot di questo testo e mandalo:\n\n' + details.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</div>';
+    }
   }
 }
 
