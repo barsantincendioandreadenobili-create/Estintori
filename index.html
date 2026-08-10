@@ -392,6 +392,21 @@ function setGeocodeStatus(msg, isError){
   const el = document.getElementById('geocode-status');
   if(el){ el.textContent = msg; el.style.color = isError ? 'var(--red)' : 'var(--steel)'; }
 }
+function autoGeocodeInBackground(id, indirizzo){
+  if(!indirizzo) return;
+  fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(indirizzo))
+    .then(res => res.json())
+    .then(data => {
+      if(!data || !data[0]) return;
+      const lat = parseFloat(data[0].lat), lng = parseFloat(data[0].lon);
+      const c = state.clients.find(x => x.id === id);
+      if(!c) return;
+      c.lat = lat; c.lng = lng;
+      clientsCollection.doc(id).update({ lat, lng }).catch(()=>{});
+      if(state.view==='map') initMap();
+    })
+    .catch(()=>{});
+}
 
 /* ---------------- Apparecchi (estintori / altro) ---------------- */
 function addApparecchio(categoria){
@@ -588,6 +603,9 @@ async function saveClientForm(e){
       firmaData: state.draftSignature ? todayISO() : (existing ? existing.firmaData : null),
     };
     persistClient(full);
+    if(full.indirizzo && (full.lat==null || full.lng==null)){
+      autoGeocodeInBackground(id, full.indirizzo);
+    }
     state.view = 'list';
     state.editingId = null;
     render();
@@ -906,6 +924,15 @@ function renderMap(){
   return `<div id="map-container" style="height:65vh;border-radius:12px;overflow:hidden;border:1px solid var(--line);margin-top:16px;"></div>
     <p class="map-hint">Le posizioni vengono calcolate dall'indirizzo inserito nella scheda cliente tramite geocodifica OpenStreetMap. Se un cliente non compare, apri la sua scheda, modificala e usa "Geocodifica indirizzo".</p>`;
 }
+function statusDivIcon(color){
+  return L.divIcon({
+    className: '',
+    html: `<div style="width:20px;height:20px;border-radius:50%;background:${color};border:2.5px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.5)"></div>`,
+    iconSize: [20,20],
+    iconAnchor: [10,10],
+    popupAnchor: [0,-10],
+  });
+}
 function initMap(){
   const container = document.getElementById('map-container');
   if(!container || typeof L==='undefined') return;
@@ -919,12 +946,13 @@ function initMap(){
   const bounds = [];
   pts.forEach(c=>{
     const s = clientOverallStatus(c);
-    const marker = L.circleMarker([c.lat, c.lng], { radius:9, color:'#fff', weight:2, fillColor:s.color, fillOpacity:1 }).addTo(leafletMap);
+    const marker = L.marker([c.lat, c.lng], { icon: statusDivIcon(s.color) }).addTo(leafletMap);
     marker.bindPopup(`<strong>${escapeHtml(c.nome)}</strong><br>${escapeHtml(c.indirizzo||'')}<br><a href="#" onclick="openDetail('${c.id}');return false;">Apri scheda</a>`);
     bounds.push([c.lat, c.lng]);
   });
-  if(bounds.length) leafletMap.fitBounds(bounds, { padding:[30,30] });
+  if(bounds.length) leafletMap.fitBounds(bounds, { padding:[40,40], maxZoom: 15 });
 }
+
 
 /* ---------------- Vista: Scheda cliente (dettaglio) ---------------- */
 function renderDetail(){
@@ -1022,8 +1050,8 @@ function renderForm(){
         </div>
       </div>
       <div class="geocode-row">
-        <button type="button" class="btn btn-outline btn-sm" onclick="geocodeIndirizzo()">${ICON_PIN} Geocodifica indirizzo</button>
-        <span id="geocode-status" class="geocode-status">${state.draftLatLng ? 'Posizione già impostata.' : ''}</span>
+        <button type="button" class="btn btn-outline btn-sm" onclick="geocodeIndirizzo()">${ICON_PIN} Verifica posizione ora</button>
+        <span id="geocode-status" class="geocode-status">${state.draftLatLng ? 'Posizione già impostata.' : 'Si trova da sola al salvataggio, oppure verificala qui prima.'}</span>
       </div>
 
       <div class="field-row">
@@ -1082,7 +1110,7 @@ function headerHtml(){
       <div class="brand">
         <div class="brand-badge"><img src="${ICON_BADGE_SRC}" alt="Icona estintore" /></div>
         <div>
-          <p class="brand-title">Registro Clienti · Estintori <span style="font-size:10px;color:var(--steel);font-weight:400">build 9</span></p>
+          <p class="brand-title">Registro Clienti · Estintori <span style="font-size:10px;color:var(--steel);font-weight:400">build 10</span></p>
         </div>
       </div>
       ${state.view!=='form' ? `<button class="btn btn-primary btn-sm" onclick="openForm(null)">${ICON_PLUS} Nuovo cliente</button>` : ''}
