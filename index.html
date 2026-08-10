@@ -539,31 +539,37 @@ function autoNextDate(){
   if(ultima && !prossimaEl.value) prossimaEl.value = addMonths(ultima, 6);
 }
 async function saveClientForm(e){
-  e.preventDefault();
-  const nome = document.getElementById('f-nome').value.trim();
+  if(e && typeof e.preventDefault === 'function') e.preventDefault();
+  const nomeEl = document.getElementById('f-nome');
+  const nome = nomeEl ? nomeEl.value.trim() : '';
   if(!nome){ alert('Inserisci il nome del cliente.'); return; }
-  const id = state.editingId || uid();
-  const existing = state.clients.find(c => c.id === id);
-  const prevLat = existing ? existing.lat : null;
-  const prevLng = existing ? existing.lng : null;
-  const full = {
-    id, nome,
-    indirizzo: document.getElementById('f-indirizzo').value.trim(),
-    telefono: document.getElementById('f-telefono').value.trim(),
-    note: document.getElementById('f-note').value.trim(),
-    dataUltimaManutenzione: document.getElementById('f-ultima').value,
-    dataProssimaManutenzione: document.getElementById('f-prossima').value,
-    lat: state.draftLatLng ? state.draftLatLng.lat : prevLat,
-    lng: state.draftLatLng ? state.draftLatLng.lng : prevLng,
-    apparecchi: state.draftApparecchi,
-    foto: state.draftPhotos,
-    firma: state.draftSignature,
-    firmaData: state.draftSignature ? todayISO() : (existing ? existing.firmaData : null),
-  };
-  await persistClient(full);
-  state.view = 'detail';
-  state.currentId = id;
-  render();
+  try{
+    const id = state.editingId || uid();
+    const existing = state.clients.find(c => c.id === id);
+    const prevLat = existing ? existing.lat : null;
+    const prevLng = existing ? existing.lng : null;
+    const full = {
+      id, nome,
+      indirizzo: document.getElementById('f-indirizzo').value.trim(),
+      telefono: document.getElementById('f-telefono').value.trim(),
+      note: document.getElementById('f-note').value.trim(),
+      dataUltimaManutenzione: document.getElementById('f-ultima').value,
+      dataProssimaManutenzione: document.getElementById('f-prossima').value,
+      lat: state.draftLatLng ? state.draftLatLng.lat : prevLat,
+      lng: state.draftLatLng ? state.draftLatLng.lng : prevLng,
+      apparecchi: state.draftApparecchi,
+      foto: state.draftPhotos,
+      firma: state.draftSignature,
+      firmaData: state.draftSignature ? todayISO() : (existing ? existing.firmaData : null),
+    };
+    await persistClient(full);
+    state.view = 'detail';
+    state.currentId = id;
+    render();
+  }catch(err){
+    state.error = 'Errore imprevisto durante il salvataggio: ' + (err && err.message ? err.message : err);
+    render();
+  }
 }
 
 /* ---------------- Generazione PDF ---------------- */
@@ -993,7 +999,7 @@ function renderForm(){
   return `
   <div class="form-wrap">
     <button class="back-btn" onclick="state.view='${cancelView}';render();">${ICON_BACK} Torna indietro</button>
-    <form id="client-form" onsubmit="saveClientForm(event)">
+    <form id="client-form" onsubmit="saveClientForm(event); return false;" onkeydown="if(event.key==='Enter' && event.target.tagName!=='TEXTAREA'){ event.preventDefault(); }">
       <h2 class="form-title">${editing ? 'Modifica cliente' : 'Nuovo cliente'}</h2>
 
       <div class="field"><label>Nome cliente *</label>
@@ -1055,7 +1061,7 @@ function renderForm(){
 
       <div class="form-actions">
         <button type="button" class="btn btn-outline" onclick="state.view='${cancelView}';render();">Annulla</button>
-        <button type="submit" class="btn btn-primary">${editing ? 'Salva modifiche' : 'Aggiungi cliente'}</button>
+        <button type="button" class="btn btn-primary" onclick="saveClientForm(event)">${editing ? 'Salva modifiche' : 'Aggiungi cliente'}</button>
       </div>
     </form>
   </div>`;
@@ -1103,6 +1109,16 @@ function render(){
     setTimeout(initMap, 30);
   }
 }
+
+window.addEventListener('error', ev => {
+  state.error = 'Errore JavaScript: ' + (ev.message || 'sconosciuto');
+  try{ render(); }catch(e){}
+});
+window.addEventListener('unhandledrejection', ev => {
+  const reason = ev.reason;
+  state.error = 'Errore imprevisto: ' + (reason && reason.message ? reason.message : String(reason));
+  try{ render(); }catch(e){}
+});
 
 initSync();
 
