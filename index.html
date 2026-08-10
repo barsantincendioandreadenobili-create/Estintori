@@ -563,8 +563,8 @@ async function saveClientForm(e){
       firmaData: state.draftSignature ? todayISO() : (existing ? existing.firmaData : null),
     };
     await persistClient(full);
-    state.view = 'detail';
-    state.currentId = id;
+    state.view = 'list';
+    state.editingId = null;
     render();
   }catch(err){
     state.error = 'Errore imprevisto durante il salvataggio: ' + (err && err.message ? err.message : err);
@@ -1075,7 +1075,7 @@ function headerHtml(){
       <div class="brand">
         <div class="brand-badge"><img src="${ICON_BADGE_SRC}" alt="Icona estintore" /></div>
         <div>
-          <p class="brand-title">Registro Clienti · Estintori</p>
+          <p class="brand-title">Registro Clienti · Estintori <span style="font-size:10px;color:var(--steel);font-weight:400">build 5</span></p>
         </div>
       </div>
       ${state.view!=='form' ? `<button class="btn btn-primary btn-sm" onclick="openForm(null)">${ICON_PLUS} Nuovo cliente</button>` : ''}

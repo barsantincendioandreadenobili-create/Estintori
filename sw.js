@@ -1,6 +1,5 @@
-const CACHE_NAME = 'registro-estintori-v4';
+const CACHE_NAME = 'registro-estintori-v5';
 const APP_URLS = [
-  './index.html',
   './manifest.json',
   './icon-180.png',
   './icon-192.png',
@@ -24,11 +23,25 @@ self.addEventListener('activate', event => {
 });
 
 self.addEventListener('fetch', event => {
-  // Solo la shell dell'app va in cache: le chiamate a Nominatim, ai font
-  // e ad altri servizi esterni passano sempre dalla rete.
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
 
+  // La pagina principale (index.html e navigazioni) va sempre presa dalla rete
+  // per prima cosa, cosi ogni aggiornamento pubblicato e visibile subito.
+  // La cache locale serve solo come riserva se non c'e connessione.
+  const isNavigation = event.request.mode === 'navigate' || url.pathname.endsWith('index.html') || url.pathname === '/' || url.pathname.endsWith('/');
+  if (isNavigation) {
+    event.respondWith(
+      fetch(event.request).then(response => {
+        const copy = response.clone();
+        caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
+        return response;
+      }).catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
+  // Icone/manifest: cache-first, va bene che restino stabili.
   event.respondWith(
     caches.match(event.request).then(cached => {
       if (cached) return cached;
