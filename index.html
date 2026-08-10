@@ -318,12 +318,14 @@ function initSync(){
 
 async function persistClient(full){
   try{
-    await clientsCollection.doc(full.id).set(full);
+    const writePromise = clientsCollection.doc(full.id).set(full);
+    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT: nessuna risposta da Firestore entro 10 secondi (verifica connessione e regole di sicurezza del database)')), 10000));
+    await Promise.race([writePromise, timeoutPromise]);
     const idx = state.clients.findIndex(c=>c.id===full.id);
     if(idx>=0) state.clients[idx] = full; else state.clients.push(full);
     state.error = '';
   }catch(err){
-    state.error = 'Salvataggio non riuscito. Controlla la connessione e riprova.';
+    state.error = 'Salvataggio non riuscito: ' + (err && err.message ? err.message : String(err));
   }
 }
 
@@ -563,6 +565,8 @@ async function saveClientForm(e){
   const nomeEl = document.getElementById('f-nome');
   const nome = nomeEl ? nomeEl.value.trim() : '';
   if(!nome){ alert('Inserisci il nome del cliente.'); return; }
+  const btn = document.getElementById('save-client-btn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Salvataggio…'; }
   try{
     const id = state.editingId || uid();
     const existing = state.clients.find(c => c.id === id);
@@ -1063,7 +1067,7 @@ function renderForm(){
 
       <div class="form-actions">
         <button type="button" class="btn btn-outline" onclick="state.view='${cancelView}';render();">Annulla</button>
-        <button type="button" class="btn btn-primary" onclick="saveClientForm(event)">${editing ? 'Salva modifiche' : 'Aggiungi cliente'}</button>
+        <button type="button" id="save-client-btn" class="btn btn-primary" onclick="saveClientForm(event)">${editing ? 'Salva modifiche' : 'Aggiungi cliente'}</button>
       </div>
     </form>
   </div>`;
@@ -1077,7 +1081,7 @@ function headerHtml(){
       <div class="brand">
         <div class="brand-badge"><img src="${ICON_BADGE_SRC}" alt="Icona estintore" /></div>
         <div>
-          <p class="brand-title">Registro Clienti · Estintori <span style="font-size:10px;color:var(--steel);font-weight:400">build 7</span></p>
+          <p class="brand-title">Registro Clienti · Estintori <span style="font-size:10px;color:var(--steel);font-weight:400">build 8</span></p>
         </div>
       </div>
       ${state.view!=='form' ? `<button class="btn btn-primary btn-sm" onclick="openForm(null)">${ICON_PLUS} Nuovo cliente</button>` : ''}
