@@ -216,10 +216,6 @@ const firebaseConfig = {
 };
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
-db.enablePersistence({ synchronizeTabs: true }).catch(err => {
-  // 'failed-precondition' = più schede aperte contemporaneamente, 'unimplemented' = browser non supportato.
-  // In questi casi l'app funziona comunque, solo senza la coda offline solida.
-});
 const clientsCollection = db.collection('clienti');
 const OPENCAGE_API_KEY = 'cd29616574b14d1f98e8595e5c5ab08f';
 
@@ -341,16 +337,44 @@ function initSync(){
   );
 }
 
+/* ---------------- Coda di sicurezza locale (localStorage) ---------------- */
+const PENDING_KEY = 'estintori_pending_writes';
+function getPendingWrites(){
+  try{ return JSON.parse(localStorage.getItem(PENDING_KEY) || '{}'); }catch(e){ return {}; }
+}
+function setPendingWrites(obj){
+  try{ localStorage.setItem(PENDING_KEY, JSON.stringify(obj)); }catch(e){}
+}
+function markPending(full){
+  const p = getPendingWrites();
+  p[full.id] = full;
+  setPendingWrites(p);
+}
+function clearPending(id){
+  const p = getPendingWrites();
+  delete p[id];
+  setPendingWrites(p);
+}
+function retryPendingWrites(){
+  const p = getPendingWrites();
+  Object.keys(p).forEach(id => {
+    clientsCollection.doc(id).set(p[id]).then(() => clearPending(id)).catch(()=>{});
+  });
+}
+
 function persistClient(full){
   // Aggiornamento locale immediato: l'interfaccia non aspetta la rete.
   const idx = state.clients.findIndex(c=>c.id===full.id);
   if(idx>=0) state.clients[idx] = full; else state.clients.push(full);
   state.error = '';
-  // L'invio al database avviene in background; onSnapshot riconcilierà
-  // automaticamente quando il server conferma. Se fallisce davvero
-  // (non solo lento), l'errore comparirà appena disponibile.
-  clientsCollection.doc(full.id).set(full).catch(err => {
-    state.error = 'Sincronizzazione non riuscita: ' + (err && err.message ? err.message : String(err)) + ' — il dato resta solo su questo dispositivo finché non si risincronizza.';
+  // Segno il salvataggio come "in sospeso": se la pagina si chiude o si
+  // aggiorna prima che il server confermi, al prossimo avvio l'app
+  // ritenterà da sola l'invio (vedi retryPendingWrites).
+  markPending(full);
+  clientsCollection.doc(full.id).set(full).then(() => {
+    clearPending(full.id);
+  }).catch(err => {
+    state.error = 'Sincronizzazione non riuscita: ' + (err && err.message ? err.message : String(err)) + ' — il dato resta salvato su questo dispositivo e riproverò a sincronizzarlo appena possibile.';
     render();
   });
 }
@@ -1335,7 +1359,7 @@ function headerHtml(){
       <div class="brand">
         <div class="brand-badge"><img src="${ICON_BADGE_SRC}" alt="Icona estintore" /></div>
         <div>
-          <p class="brand-title">Registro Clienti · Estintori <span style="font-size:10px;color:var(--steel);font-weight:400">build 15</span></p>
+          <p class="brand-title">Registro Clienti · Estintori <span style="font-size:10px;color:var(--steel);font-weight:400">build 16</span></p>
         </div>
       </div>
       ${state.view!=='form' ? `<button class="btn btn-primary btn-sm" onclick="openForm(null)">${ICON_PLUS} Nuovo cliente</button>` : ''}
@@ -1389,6 +1413,7 @@ window.addEventListener('unhandledrejection', ev => {
 });
 
 initSync();
+retryPendingWrites();
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
