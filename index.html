@@ -38,7 +38,7 @@
 
   .container{max-width:920px;margin:0 auto;padding:0 16px}
 
-  .topbar{background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
+  .topbar{background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20;padding-top:env(safe-area-inset-top)}
   .topbar-inner{display:flex;justify-content:space-between;align-items:center;padding:14px 0 10px;gap:10px}
   .brand{display:flex;align-items:center;gap:10px;min-width:0}
   .brand-badge{width:36px;height:36px;flex:none;border-radius:9px;background:var(--ink);color:var(--bg);display:flex;align-items:center;justify-content:center;overflow:hidden}
@@ -238,7 +238,7 @@ function drawCompanyHeader(doc, marginX, maxW, title){
 }
 
 /* ---------------- Costanti e utilità ---------------- */
-const TIPI = ["Polvere ABC","CO2","Schiuma","Idrico","Acqua"];
+const TIPI = ["Polvere","CO2","Schiuma","Idrico","Acqua"];
 const MONTHS_IT = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 
 const STATUS = {
@@ -1368,7 +1368,7 @@ function headerHtml(){
       <div class="brand">
         <div class="brand-badge"><img src="${ICON_BADGE_SRC}" alt="Icona estintore" /></div>
         <div>
-          <p class="brand-title">Registro Clienti · Estintori <span style="font-size:10px;color:var(--steel);font-weight:400">build 18</span></p>
+          <p class="brand-title">Registro Clienti · Estintori <span style="font-size:10px;color:var(--steel);font-weight:400">build 19</span></p>
         </div>
       </div>
       ${state.view!=='form' ? `<button class="btn btn-primary btn-sm" onclick="openForm(null)">${ICON_PLUS} Nuovo cliente</button>` : ''}
