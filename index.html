@@ -132,7 +132,12 @@
   .geocode-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:-2px 0 14px}
   .geocode-status{font-size:12px;color:var(--steel)}
 
-  .apparecchi-section,.photos-section,.signature-section{margin-top:22px;padding-top:18px;border-top:1px solid var(--line)}
+  .apparecchi-section,.photos-section,.signature-section,.payment-section{margin-top:22px;padding-top:18px;border-top:1px solid var(--line)}
+  .payment-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  @media (max-width:560px){.payment-row{grid-template-columns:1fr}}
+  .input-euro{position:relative}
+  .input-euro .euro-sign{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--steel);font-weight:700;pointer-events:none}
+  .input-euro input{padding-left:28px;width:100%}
   .section-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px}
   .section-head h3{font-family:'Oswald',sans-serif;font-size:15px;font-weight:600;color:var(--ink);margin:0}
   .section-actions{display:flex;gap:8px}
@@ -598,6 +603,29 @@ function autoNextDate(){
   const prossimaEl = document.getElementById('f-prossima');
   if(ultima) prossimaEl.value = addMonths(ultima, 6);
 }
+function collectFormData(){
+  const id = state.editingId || uid();
+  const existing = state.clients.find(c => c.id === id);
+  const prevLat = existing ? existing.lat : null;
+  const prevLng = existing ? existing.lng : null;
+  return {
+    id,
+    nome: document.getElementById('f-nome').value.trim(),
+    indirizzo: document.getElementById('f-indirizzo').value.trim(),
+    telefono: document.getElementById('f-telefono').value.trim(),
+    note: document.getElementById('f-note').value.trim(),
+    dataUltimaManutenzione: document.getElementById('f-ultima').value,
+    dataProssimaManutenzione: document.getElementById('f-prossima').value,
+    lat: state.draftLatLng ? state.draftLatLng.lat : prevLat,
+    lng: state.draftLatLng ? state.draftLatLng.lng : prevLng,
+    apparecchi: state.draftApparecchi,
+    foto: state.draftPhotos,
+    firma: state.draftSignature,
+    firmaData: state.draftSignature ? todayISO() : (existing ? existing.firmaData : null),
+    importo: document.getElementById('f-importo').value.trim(),
+    statoPagamento: document.getElementById('f-stato-pagamento').value,
+  };
+}
 async function saveClientForm(e){
   if(e && typeof e.preventDefault === 'function') e.preventDefault();
   const nomeEl = document.getElementById('f-nome');
@@ -606,27 +634,10 @@ async function saveClientForm(e){
   const btn = document.getElementById('save-client-btn');
   if(btn){ btn.disabled = true; btn.textContent = 'Salvataggio…'; }
   try{
-    const id = state.editingId || uid();
-    const existing = state.clients.find(c => c.id === id);
-    const prevLat = existing ? existing.lat : null;
-    const prevLng = existing ? existing.lng : null;
-    const full = {
-      id, nome,
-      indirizzo: document.getElementById('f-indirizzo').value.trim(),
-      telefono: document.getElementById('f-telefono').value.trim(),
-      note: document.getElementById('f-note').value.trim(),
-      dataUltimaManutenzione: document.getElementById('f-ultima').value,
-      dataProssimaManutenzione: document.getElementById('f-prossima').value,
-      lat: state.draftLatLng ? state.draftLatLng.lat : prevLat,
-      lng: state.draftLatLng ? state.draftLatLng.lng : prevLng,
-      apparecchi: state.draftApparecchi,
-      foto: state.draftPhotos,
-      firma: state.draftSignature,
-      firmaData: state.draftSignature ? todayISO() : (existing ? existing.firmaData : null),
-    };
+    const full = collectFormData();
     persistClient(full);
     if(full.indirizzo && (full.lat==null || full.lng==null)){
-      autoGeocodeInBackground(id, full.indirizzo);
+      autoGeocodeInBackground(full.id, full.indirizzo);
     }
     state.view = 'list';
     state.editingId = null;
@@ -636,8 +647,121 @@ async function saveClientForm(e){
     render();
   }
 }
+async function saveAndGenerateInterventoPDF(e){
+  if(e && typeof e.preventDefault === 'function') e.preventDefault();
+  const nomeEl = document.getElementById('f-nome');
+  const nome = nomeEl ? nomeEl.value.trim() : '';
+  if(!nome){ alert('Inserisci il nome del cliente.'); return; }
+  const btn = document.getElementById('save-pdf-btn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Salvataggio…'; }
+  try{
+    const full = collectFormData();
+    persistClient(full);
+    if(full.indirizzo && (full.lat==null || full.lng==null)){
+      autoGeocodeInBackground(full.id, full.indirizzo);
+    }
+    state.view = 'list';
+    state.editingId = null;
+    render();
+    generateInterventoPDF(full);
+  }catch(err){
+    state.error = 'Errore imprevisto durante il salvataggio: ' + (err && err.message ? err.message : err);
+    render();
+  }
+}
 
 /* ---------------- Generazione PDF ---------------- */
+function generateInterventoPDF(c){
+  if(typeof window.jspdf === 'undefined'){ alert('Libreria PDF non disponibile: verifica la connessione e riprova.'); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit:'mm', format:'a4' });
+  const marginX = 16, maxW = 178;
+  let y = 20;
+
+  doc.setFont('helvetica','bold'); doc.setFontSize(16);
+  doc.text('Rapporto intervento — Manutenzione estintori', marginX, y); y += 8;
+  doc.setDrawColor(210); doc.line(marginX, y, 194, y); y += 8;
+
+  doc.setFontSize(12); doc.setFont('helvetica','bold');
+  doc.text(c.nome || '—', marginX, y); y += 6;
+  doc.setFont('helvetica','normal'); doc.setFontSize(10);
+  [
+    'Indirizzo: ' + (c.indirizzo || '—'),
+    'Telefono: ' + (c.telefono || '—'),
+    'Data intervento: ' + fmtDate(todayISO()),
+  ].forEach(line => { doc.text(line, marginX, y); y += 5.2; });
+  y += 3;
+
+  const estintori = (c.apparecchi||[]).filter(a=>a.categoria==='estintore');
+  const altro = (c.apparecchi||[]).filter(a=>a.categoria==='altro');
+
+  doc.setFont('helvetica','bold'); doc.text('Estintori', marginX, y); y += 6;
+  doc.setFont('helvetica','normal');
+  if(estintori.length===0){ doc.text('Nessuno registrato.', marginX, y); y += 6; }
+  estintori.forEach(a=>{
+    const line = '• ' + (a.tipo||'') + ' — ' + (a.matricola||'s.n.') + ' — ' + (a.posizione||'') + (a.capacita? ' ('+a.capacita+')':'');
+    const lines = doc.splitTextToSize(line, maxW);
+    if(y + lines.length*5 > 265){ doc.addPage(); y=20; }
+    doc.text(lines, marginX, y); y += lines.length*5 + 1;
+  });
+  y += 3;
+
+  if(altro.length){
+    doc.setFont('helvetica','bold'); doc.text('Altro', marginX, y); y += 6;
+    doc.setFont('helvetica','normal');
+    altro.forEach(a=>{
+      const line = '• ' + (a.nome||'') + ' — ' + (a.note||'');
+      const lines = doc.splitTextToSize(line, maxW);
+      if(y + lines.length*5 > 265){ doc.addPage(); y=20; }
+      doc.text(lines, marginX, y); y += lines.length*5 + 1;
+    });
+    y += 3;
+  }
+
+  if(c.note){
+    if(y > 250){ doc.addPage(); y=20; }
+    doc.setFont('helvetica','bold'); doc.text('Note', marginX, y); y += 6;
+    doc.setFont('helvetica','normal');
+    const lines = doc.splitTextToSize(c.note, maxW);
+    doc.text(lines, marginX, y); y += lines.length*5 + 4;
+  }
+
+  if(y > 245){ doc.addPage(); y=20; }
+  doc.setDrawColor(210); doc.line(marginX, y, 194, y); y += 8;
+  doc.setFont('helvetica','bold'); doc.setFontSize(13);
+  doc.text('Pagamento', marginX, y); y += 8;
+  doc.setFont('helvetica','normal'); doc.setFontSize(11);
+  const importoTxt = c.importo ? ('€ ' + Number(c.importo).toFixed(2).replace('.', ',')) : 'Non specificato';
+  const statoTxt = c.statoPagamento === 'pagato' ? 'PAGATO' : (c.statoPagamento === 'da_pagare' ? 'DA PAGARE' : 'Non specificato');
+  doc.text('Importo: ' + importoTxt, marginX, y); y += 6;
+  doc.setFont('helvetica','bold');
+  doc.text('Stato: ' + statoTxt, marginX, y); y += 10;
+
+  doc.setFont('helvetica','bold'); doc.setFontSize(11);
+  doc.text('Firma cliente', marginX, y); y += 6;
+  if(c.firma){
+    try{ doc.addImage(c.firma, 'PNG', marginX, y, 60, 20); }catch(e){}
+    y += 24;
+    doc.setFont('helvetica','normal'); doc.setFontSize(9);
+    doc.text('Firmato il ' + fmtDate(c.firmaData || todayISO()), marginX, y);
+  }else{
+    doc.setFont('helvetica','normal');
+    doc.text('Non firmato.', marginX, y);
+  }
+
+  const fname = 'intervento-' + (c.nome||'cliente').toLowerCase().replace(/[^a-z0-9]+/g,'-') + '-' + todayISO() + '.pdf';
+  const blob = doc.output('blob');
+  const file = new File([blob], fname, { type: 'application/pdf' });
+  if(navigator.canShare && navigator.canShare({ files:[file] })){
+    navigator.share({
+      files: [file],
+      title: 'Rapporto intervento – ' + (c.nome||''),
+      text: 'Rapporto intervento manutenzione estintori',
+    }).catch(()=>{ doc.save(fname); });
+  }else{
+    doc.save(fname);
+  }
+}
 function generatePDF(id){
   const c = state.clients.find(x => x.id === id);
   if(!c){ alert('Cliente non trovato.'); return; }
@@ -1050,6 +1174,10 @@ function renderDetail(){
         <div><dt>Ciclo mensile</dt><dd>${cyclePairLabel(c)}</dd></div>
         <div><dt>Ultima manutenzione</dt><dd>${fmtDate(c.dataUltimaManutenzione)}</dd></div>
         <div><dt>Prossima manutenzione</dt><dd style="color:${s.color};font-weight:600">${fmtDate(c.dataProssimaManutenzione)}</dd></div>
+        ${(c.importo || c.statoPagamento) ? `
+        <div><dt>Importo intervento</dt><dd>${c.importo ? '€ '+Number(c.importo).toFixed(2).replace('.', ',') : '—'}</dd></div>
+        <div><dt>Stato pagamento</dt><dd style="color:${c.statoPagamento==='pagato'?'var(--teal)':(c.statoPagamento==='da_pagare'?'var(--red)':'var(--ink)')};font-weight:600">${c.statoPagamento==='pagato'?'Pagato':(c.statoPagamento==='da_pagare'?'Da pagare':'—')}</dd></div>
+        ` : ''}
       </dl>
       ${c.note ? `<p class="detail-note">${escapeHtml(c.note)}</p>` : ''}
       <div class="detail-actions">
@@ -1159,6 +1287,27 @@ function renderForm(){
         <div id="photos-list" class="photos-list"></div>
       </div>
 
+      <div class="payment-section">
+        <div class="section-head"><h3>Intervento</h3></div>
+        <div class="payment-row">
+          <div class="field">
+            <label>Stato pagamento</label>
+            <select id="f-stato-pagamento">
+              <option value="" ${!editing?.statoPagamento ? 'selected' : ''}>—</option>
+              <option value="da_pagare" ${editing?.statoPagamento==='da_pagare' ? 'selected' : ''}>Da pagare</option>
+              <option value="pagato" ${editing?.statoPagamento==='pagato' ? 'selected' : ''}>Pagato</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Importo</label>
+            <div class="input-euro">
+              <span class="euro-sign">€</span>
+              <input id="f-importo" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0,00" value="${escapeHtml(editing?editing.importo:'')}" />
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="signature-section">
         <div class="section-head">
           <h3>Firma cliente</h3>
@@ -1172,6 +1321,8 @@ function renderForm(){
         <button type="button" class="btn btn-outline" onclick="state.view='${cancelView}';render();">Annulla</button>
         <button type="button" id="save-client-btn" class="btn btn-primary" onclick="saveClientForm(event)">${editing ? 'Salva modifiche' : 'Aggiungi cliente'}</button>
       </div>
+      <button type="button" id="save-pdf-btn" class="btn btn-block" style="margin-top:10px;background:var(--teal);color:#fff" onclick="saveAndGenerateInterventoPDF(event)">${ICON_PRINTER} Salva e genera PDF intervento</button>
+      <p class="empty-hint-sm" style="margin-top:6px">Salva la scheda e crea subito un PDF con importo e firma: una volta generato non è più modificabile, così i dati di pagamento restano al sicuro. Da lì potrai inviarlo direttamente.</p>
     </form>
   </div>`;
 }
@@ -1184,7 +1335,7 @@ function headerHtml(){
       <div class="brand">
         <div class="brand-badge"><img src="${ICON_BADGE_SRC}" alt="Icona estintore" /></div>
         <div>
-          <p class="brand-title">Registro Clienti · Estintori <span style="font-size:10px;color:var(--steel);font-weight:400">build 14</span></p>
+          <p class="brand-title">Registro Clienti · Estintori <span style="font-size:10px;color:var(--steel);font-weight:400">build 15</span></p>
         </div>
       </div>
       ${state.view!=='form' ? `<button class="btn btn-primary btn-sm" onclick="openForm(null)">${ICON_PLUS} Nuovo cliente</button>` : ''}
