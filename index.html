@@ -224,16 +224,17 @@ const COMPANY_EMAIL = 'bars.antincendio@gmail.com';
 const COMPANY_PHONE = 'Tel. 0421 341716';
 const COMPANY_PIVA = 'P.IVA 04452230271';
 function drawCompanyHeader(doc, marginX, maxW, title){
-  let y = 20;
-  doc.setFont('helvetica','bold'); doc.setFontSize(16);
-  doc.text(COMPANY_NAME, marginX, y); y += 7;
-  doc.setFont('helvetica','normal'); doc.setFontSize(12); doc.setTextColor(70);
-  doc.text(title, marginX, y); y += 7;
-  doc.setDrawColor(200); doc.line(marginX, y, marginX + maxW, y); y += 6;
-  doc.setFontSize(9); doc.setTextColor(120);
-  doc.text(COMPANY_ADDRESS + '   ·   ' + COMPANY_EMAIL, marginX, y); y += 4.5;
-  doc.text(COMPANY_PHONE + '   ·   ' + COMPANY_PIVA, marginX, y); y += 8;
+  let y = 15;
+  doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.setTextColor(130);
+  doc.text(title.toUpperCase(), marginX, y); y += 7;
   doc.setTextColor(0);
+  doc.setFontSize(17);
+  doc.text(COMPANY_NAME, marginX, y); y += 6;
+  doc.setFont('helvetica','bold'); doc.setFontSize(9.5);
+  doc.text(COMPANY_ADDRESS + '   ·   ' + COMPANY_EMAIL, marginX, y); y += 4.5;
+  doc.text(COMPANY_PHONE + '   ·   ' + COMPANY_PIVA, marginX, y); y += 6;
+  doc.setDrawColor(200); doc.line(marginX, y, marginX + maxW, y); y += 8;
+  doc.setFont('helvetica','normal'); doc.setTextColor(0);
   return y;
 }
 
@@ -718,9 +719,11 @@ function generateInterventoPDF(c){
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit:'mm', format:'a4' });
   const marginX = 16, maxW = 178;
-  let y = drawCompanyHeader(doc, marginX, maxW, 'Rapporto intervento — Manutenzione estintori');
+  let y = drawCompanyHeader(doc, marginX, maxW, 'Rapporto intervento');
 
-  doc.setFontSize(12); doc.setFont('helvetica','bold');
+  doc.setFont('helvetica','bold'); doc.setFontSize(13);
+  doc.text('Dati cliente', marginX, y); y += 7;
+  doc.setFontSize(12);
   doc.text(c.nome || '—', marginX, y); y += 6;
   doc.setFont('helvetica','normal'); doc.setFontSize(10);
   [
@@ -737,7 +740,7 @@ function generateInterventoPDF(c){
   doc.setFont('helvetica','normal');
   if(estintori.length===0){ doc.text('Nessuno registrato.', marginX, y); y += 6; }
   estintori.forEach(a=>{
-    const line = '• ' + (a.tipo||'') + ' — ' + (a.matricola||'s.n.') + ' — ' + (a.posizione||'') + (a.capacita? ' ('+a.capacita+')':'');
+    const line = '• ' + (a.tipo||'') + ' — Matricola: ' + (a.matricola||'s.n.') + (a.posizione? ' — '+a.posizione:'') + (a.capacita? ' ('+a.capacita+')':'');
     const lines = doc.splitTextToSize(line, maxW);
     if(y + lines.length*5 > 265){ doc.addPage(); y=20; }
     doc.text(lines, marginX, y); y += lines.length*5 + 1;
@@ -828,7 +831,7 @@ function generatePDF(id){
   doc.setFont('helvetica','normal');
   if(estintori.length===0){ doc.text('Nessuno registrato.', marginX, y); y += 6; }
   estintori.forEach(a=>{
-    const line = '• ' + (a.tipo||'') + ' — ' + (a.matricola||'s.n.') + ' — ' + (a.posizione||'') + (a.capacita? ' ('+a.capacita+')':'')
+    const line = '• ' + (a.tipo||'') + ' — Matricola: ' + (a.matricola||'s.n.') + (a.posizione? ' — '+a.posizione:'') + (a.capacita? ' ('+a.capacita+')':'')
       + (a.annoProduzione? ' — produzione '+a.annoProduzione:'') + (a.annoRevisione? ' — revisione '+a.annoRevisione:'') + (a.annoScadenza? ' — scadenza '+a.annoScadenza:'');
     const lines = doc.splitTextToSize(line, maxW);
     if(y + lines.length*5 > 275){ doc.addPage(); y=20; }
@@ -930,7 +933,7 @@ function generateFullPDF(){
     doc.setFont('helvetica','normal');
     if(estintori.length===0){ doc.text('Nessuno registrato.', marginX, y); y += 6; }
     estintori.forEach(a=>{
-      const line = '• ' + (a.tipo||'') + ' — ' + (a.matricola||'s.n.') + ' — ' + (a.posizione||'') + (a.capacita? ' ('+a.capacita+')':'')
+      const line = '• ' + (a.tipo||'') + ' — Matricola: ' + (a.matricola||'s.n.') + (a.posizione? ' — '+a.posizione:'') + (a.capacita? ' ('+a.capacita+')':'')
         + (a.annoProduzione? ' — produzione '+a.annoProduzione:'') + (a.annoRevisione? ' — revisione '+a.annoRevisione:'') + (a.annoScadenza? ' — scadenza '+a.annoScadenza:'');
       const lines = doc.splitTextToSize(line, maxW);
       if(y + lines.length*5 > 275){ doc.addPage(); y=20; }
@@ -1368,7 +1371,7 @@ function headerHtml(){
       <div class="brand">
         <div class="brand-badge"><img src="${ICON_BADGE_SRC}" alt="Icona estintore" /></div>
         <div>
-          <p class="brand-title">Registro Clienti · Estintori <span style="font-size:10px;color:var(--steel);font-weight:400">build 19</span></p>
+          <p class="brand-title">Registro Clienti · Estintori <span style="font-size:10px;color:var(--steel);font-weight:400">build 20</span></p>
         </div>
       </div>
       ${state.view!=='form' ? `<button class="btn btn-primary btn-sm" onclick="openForm(null)">${ICON_PLUS} Nuovo cliente</button>` : ''}
