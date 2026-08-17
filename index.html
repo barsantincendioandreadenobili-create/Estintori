@@ -18,6 +18,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
 
@@ -40,6 +41,13 @@
 
   .topbar{background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20;padding-top:env(safe-area-inset-top)}
   .topbar-inner{display:flex;justify-content:space-between;align-items:center;padding:14px 0 10px;gap:10px}
+  .header-actions{display:flex;align-items:center;gap:6px}
+  .login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;background:var(--bg)}
+  .login-card{width:100%;max-width:360px;background:#fff;border:1px solid var(--line);border-radius:16px;padding:28px 24px;text-align:center}
+  .login-title{font-family:'Oswald',sans-serif;font-weight:700;font-size:19px;color:var(--ink);margin:0 0 4px}
+  .login-sub{font-size:13px;color:var(--steel);margin:0 0 20px}
+  .login-card .field{text-align:left;margin-bottom:14px}
+  .login-card input{width:100%;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:14px}
   .brand{display:flex;align-items:center;gap:10px;min-width:0}
   .brand-badge{width:36px;height:36px;flex:none;border-radius:9px;background:var(--ink);color:var(--bg);display:flex;align-items:center;justify-content:center;overflow:hidden}
   .brand-badge img{width:100%;height:100%;object-fit:cover;display:block}
@@ -69,7 +77,12 @@
   #search-input{width:100%;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:14px;background:#fff;color:var(--ink)}
 
   .client-grid{display:flex;flex-direction:column;gap:8px;margin-top:16px;padding-bottom:40px}
-  .client-row{display:flex;align-items:stretch;background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .client-row{display:flex;align-items:center;background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .client-row.done{background:var(--teal-bg);border-color:var(--teal)}
+  .client-row.done .client-row-name{color:var(--teal)}
+  .row-check{width:26px;height:26px;border-radius:50%;border:2px solid var(--line);background:#fff;flex:none;margin-left:12px;display:flex;align-items:center;justify-content:center;color:#fff;padding:0}
+  .row-check.checked{background:var(--teal);border-color:var(--teal)}
+  .row-check svg{width:14px;height:14px}
   .client-row-main{flex:1;display:flex;align-items:center;gap:10px;padding:12px 14px;background:none;border:none;text-align:left;min-width:0}
   .status-dot{width:11px;height:11px;border-radius:50%;flex:none}
   .client-row-text{display:flex;flex-direction:column;min-width:0;gap:1px}
@@ -117,7 +130,7 @@
   .map-hint{font-size:12px;color:var(--steel);margin-top:10px;line-height:1.5}
   .month-chip-row{display:flex;gap:6px;overflow-x:auto;padding:2px 2px 4px;margin-top:14px;-webkit-overflow-scrolling:touch}
   .month-chip{flex:none;border:1px solid var(--line);background:#fff;color:var(--ink-soft);font-size:12.5px;font-weight:600;padding:7px 12px;border-radius:999px;white-space:nowrap}
-  .month-chip.active{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .month-chip.active{background:var(--amber);color:#fff;border-color:var(--amber)}
 
   .form-wrap{max-width:680px;margin:0 auto;padding-bottom:60px}
   .back-btn{display:inline-flex;align-items:center;gap:4px;background:none;border:none;color:var(--ink-soft);font-size:13px;margin:14px 0}
@@ -216,6 +229,7 @@ const firebaseConfig = {
 };
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
+const auth = firebase.auth();
 const clientsCollection = db.collection('clienti');
 const OPENCAGE_API_KEY = 'cd29616574b14d1f98e8595e5c5ab08f';
 const COMPANY_NAME = 'BARS SICUREZZA ANTINCENDIO';
@@ -296,14 +310,15 @@ function cyclePairLabel(c){
   return MONTHS_IT[m1] + ' / ' + MONTHS_IT[m2];
 }
 function clientOverallStatus(c){
+  if(c.fatto) return { color:'#3D6A5C', bg:'#E4EEE9', label:'Fatto' };
   const y = currentYear();
   const estintori = (c.apparecchi||[]).filter(a => a.categoria==='estintore');
-  if(estintori.length===0) return STATUS.ignoto;
+  if(estintori.length===0) return { color:'#2F7DB6', bg:'#DCEBF5', label:'Da fare' };
   const scadutoOra = estintori.some(a => a.annoScadenza && Number(a.annoScadenza) <= y);
-  if(scadutoOra) return STATUS.scaduto;
+  if(scadutoOra) return { color:'#B8402C', bg:'#F5E1DC', label:'Scadenze' };
   const daRevisionare = estintori.some(a => (a.annoRevisione && Number(a.annoRevisione) <= y) || (a.annoScadenza && Number(a.annoScadenza) === y));
-  if(daRevisionare) return STATUS.presto;
-  return STATUS.ok;
+  if(daRevisionare) return { color:'#B9791F', bg:'#F5EAD3', label:'Da revisionare' };
+  return { color:'#2F7DB6', bg:'#DCEBF5', label:'Da fare' };
 }
 
 /* icone SVG inline (stroke, stile lineare) */
@@ -315,6 +330,8 @@ const ICON_CAMERA = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" 
 const ICON_BACK = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>`;
 const ICON_X = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
 const ICON_PRINTER = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>`;
+const ICON_LOGOUT = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>`;
+const ICON_CHECK = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
 const ICON_EYE = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
 const ICON_NAV = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>`;
 const ICON_FLAME = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2s5 5.5 5 10a5 5 0 0 1-10 0C7 8 12 2 12 2z"/><path d="M12 18a2.5 2.5 0 0 0 2.5-2.5c0-1-.5-1.7-1.3-2.4.1.9-.4 1.4-.7 1.4-.4 0-.7-.4-.6-1-.9.7-1.4 1.4-1.4 2C10.5 16.9 11.2 18 12 18z"/></svg>`;
@@ -335,8 +352,58 @@ const state = {
   draftSignature: null,
   draftLatLng: null,
   focusClientId: null,
-  mapMonthFilter: null,
+  monthFilter: null,
+  user: null,
+  authChecked: false,
+  authError: '',
 };
+
+/* ---------------- Autenticazione ---------------- */
+let syncStarted = false;
+auth.onAuthStateChanged(user => {
+  state.user = user;
+  state.authChecked = true;
+  if(user && !syncStarted){
+    syncStarted = true;
+    initSync();
+    retryPendingWrites();
+  }
+  render();
+});
+function doLogin(e){
+  if(e && typeof e.preventDefault === 'function') e.preventDefault();
+  const email = document.getElementById('login-email').value.trim();
+  const pass = document.getElementById('login-password').value;
+  const btn = document.getElementById('login-btn');
+  state.authError = '';
+  if(btn){ btn.disabled = true; btn.textContent = 'Accesso…'; }
+  auth.signInWithEmailAndPassword(email, pass).catch(err => {
+    state.authError = err && err.code === 'auth/invalid-credential'
+      ? 'Email o password non corretti.'
+      : 'Accesso non riuscito: ' + (err && err.message ? err.message : String(err));
+    render();
+  });
+}
+function doLogout(){
+  if(!confirm('Uscire dall\'app?')) return;
+  auth.signOut();
+}
+function renderLogin(){
+  return `
+  <div class="login-wrap">
+    <div class="login-card">
+      <div class="brand-badge" style="margin:0 auto 14px"><img src="${ICON_BADGE_SRC}" alt="Icona estintore" /></div>
+      <h1 class="login-title">Registro Clienti · Estintori</h1>
+      <p class="login-sub">Accedi con le credenziali fornite dall'azienda</p>
+      <form onsubmit="doLogin(event)">
+        <div class="field"><label>Email</label><input id="login-email" type="email" autocomplete="username" required /></div>
+        <div class="field"><label>Password</label><input id="login-password" type="password" autocomplete="current-password" required /></div>
+        ${state.authError ? `<div class="error-banner" style="margin:0 0 14px">${escapeHtml(state.authError)}</div>` : ''}
+        <button type="submit" id="login-btn" class="btn btn-primary btn-block">Accedi</button>
+      </form>
+    </div>
+  </div>`;
+}
 
 /* ---------------- Caricamento / persistenza (Firestore) ---------------- */
 function initSync(){
@@ -396,6 +463,39 @@ function persistClient(full){
     state.error = 'Sincronizzazione non riuscita: ' + (err && err.message ? err.message : String(err)) + ' — il dato resta salvato su questo dispositivo e riproverò a sincronizzarlo appena possibile.';
     render();
   });
+}
+
+function toggleFatto(id){
+  const c = state.clients.find(x => x.id === id);
+  if(!c) return;
+  const newVal = !c.fatto;
+  c.fatto = newVal;
+  const operatore = (state.user && state.user.email) ? state.user.email : 'sconosciuto';
+  c.fattoDa = newVal ? operatore : null;
+  c.fattoIl = newVal ? todayISO() : null;
+  markPending(c);
+  clientsCollection.doc(id).update({ fatto: newVal, fattoDa: c.fattoDa, fattoIl: c.fattoIl }).then(() => {
+    clearPending(id);
+  }).catch(err => {
+    state.error = 'Sincronizzazione non riuscita: ' + (err && err.message ? err.message : String(err));
+  });
+  render();
+}
+
+function azzeraFatto(){
+  const doneClients = state.clients.filter(c => c.fatto);
+  if(doneClients.length===0){ alert('Nessun cliente è segnato come "fatto" al momento.'); return; }
+  if(!confirm('Azzerare la spunta "fatto" per tutti i ' + doneClients.length + ' clienti attualmente segnati? Potrai rispuntarli singolarmente in seguito.')) return;
+  const batch = db.batch();
+  doneClients.forEach(c => {
+    c.fatto = false; c.fattoDa = null; c.fattoIl = null;
+    batch.update(clientsCollection.doc(c.id), { fatto: false, fattoDa: null, fattoIl: null });
+  });
+  batch.commit().catch(err => {
+    state.error = 'Azzeramento non riuscito: ' + (err && err.message ? err.message : String(err));
+    render();
+  });
+  render();
 }
 
 async function deleteClient(id){
@@ -651,6 +751,7 @@ function collectFormData(){
   const existing = state.clients.find(c => c.id === id);
   const prevLat = existing ? existing.lat : null;
   const prevLng = existing ? existing.lng : null;
+  const operatore = (state.user && state.user.email) ? state.user.email : 'sconosciuto';
   return {
     id,
     nome: document.getElementById('f-nome').value.trim(),
@@ -667,6 +768,10 @@ function collectFormData(){
     firmaData: state.draftSignature ? todayISO() : (existing ? existing.firmaData : null),
     importo: document.getElementById('f-importo').value.trim(),
     statoPagamento: document.getElementById('f-stato-pagamento').value,
+    creatoDa: existing ? (existing.creatoDa || operatore) : operatore,
+    creatoIl: existing ? (existing.creatoIl || todayISO()) : todayISO(),
+    modificatoDa: operatore,
+    modificatoIl: todayISO(),
   };
 }
 async function saveClientForm(e){
@@ -730,6 +835,7 @@ function generateInterventoPDF(c){
     'Indirizzo: ' + (c.indirizzo || '—'),
     'Telefono: ' + (c.telefono || '—'),
     'Data intervento: ' + fmtDate(todayISO()),
+    'Operatore: ' + ((state.user && state.user.email) ? state.user.email : '—'),
   ].forEach(line => { doc.text(line, marginX, y); y += 5.2; });
   y += 3;
 
@@ -1006,6 +1112,9 @@ function filteredClients(){
   }else if(state.filter==='estintori'){
     list = list.filter(c => (c.apparecchi||[]).some(a => a.categoria==='estintore'));
   }
+  if(state.monthFilter!==null){
+    list = list.filter(c => c.dataProssimaManutenzione && new Date(c.dataProssimaManutenzione+'T00:00:00').getMonth()===state.monthFilter);
+  }
   if(state.query.trim()){
     const q = state.query.trim().toLowerCase();
     list = list.filter(c => (c.nome||'').toLowerCase().includes(q) || (c.indirizzo||'').toLowerCase().includes(q));
@@ -1032,7 +1141,8 @@ function clientTag(c){
   }
   return `
   ${matchExtra}
-  <div class="client-row">
+  <div class="client-row ${c.fatto ? 'done' : ''}">
+    <button class="row-check ${c.fatto ? 'checked' : ''}" onclick="toggleFatto('${c.id}')" title="${c.fatto ? 'Segna come da fare' : 'Segna come fatto'}">${c.fatto ? ICON_CHECK : ''}</button>
     <button class="client-row-main" onclick="openForm('${c.id}')">
       <span class="status-dot" style="background:${s.color}" title="${s.label}"></span>
       <span class="client-row-text">
@@ -1068,6 +1178,8 @@ function renderList(){
       <input id="search-input" value="${escapeHtml(state.query)}" oninput="handleSearchInput(this.value)" placeholder="Cerca cliente o indirizzo…" />
     </div>
     <button class="btn btn-outline btn-block" onclick="generateFullPDF()" style="margin-top:10px">${ICON_PRINTER} Stampa / esporta elenco completo (backup cartaceo)</button>
+    <button class="btn btn-outline btn-block" onclick="azzeraFatto()" style="margin-top:8px">Azzera spunte "fatto"</button>
+    ${monthChipRowHtml()}
     <div id="client-grid" class="client-grid">${clientGridHtml()}</div>
   `;
 }
@@ -1103,15 +1215,19 @@ function renderCalendar(){
 
 /* ---------------- Vista: Mappa ---------------- */
 let leafletMap = null;
-function renderMap(){
-  const y = currentYear();
+function monthChipRowHtml(){
   const monthButtons = MONTHS_IT.map((name,i) => `
-    <button class="month-chip ${state.mapMonthFilter===i?'active':''}" onclick="setMapMonthFilter(${i})">${name.slice(0,3)}</button>`).join('');
+    <button class="month-chip ${state.monthFilter===i?'active':''}" onclick="setMonthFilter(${i})">${name.slice(0,3)}</button>`).join('');
   return `
     <div class="month-chip-row">
-      <button class="month-chip ${state.mapMonthFilter===null?'active':''}" onclick="setMapMonthFilter(null)">Tutti</button>
+      <button class="month-chip ${state.monthFilter===null?'active':''}" onclick="setMonthFilter(null)">Tutti i mesi</button>
       ${monthButtons}
-    </div>
+    </div>`;
+}
+function renderMap(){
+  const y = currentYear();
+  return `
+    ${monthChipRowHtml()}
     <div id="map-container" style="height:60vh;border-radius:12px;overflow:hidden;border:1px solid var(--line);margin-top:10px;"></div>
     <p class="map-hint">Le posizioni vengono calcolate dall'indirizzo inserito nella scheda cliente tramite geocodifica OpenCage. Se un pallino è nel posto sbagliato, <strong>tienilo premuto e trascinalo</strong> nella posizione corretta: si salva da solo. Il filtro sopra mostra solo i clienti con prossima manutenzione in quel mese (anno ${y}).</p>`;
 }
@@ -1124,8 +1240,8 @@ function statusDivIcon(color){
     popupAnchor: [0,-10],
   });
 }
-function setMapMonthFilter(m){
-  state.mapMonthFilter = m;
+function setMonthFilter(m){
+  state.monthFilter = m;
   render();
 }
 function updateClientLatLng(id, lat, lng){
@@ -1142,8 +1258,8 @@ function initMap(){
     attribution: '&copy; OpenStreetMap contributors', maxZoom: 19
   }).addTo(leafletMap);
   let pts = state.clients.filter(c => c.lat!=null && c.lng!=null);
-  if(state.mapMonthFilter!==null){
-    pts = pts.filter(c => c.dataProssimaManutenzione && new Date(c.dataProssimaManutenzione+'T00:00:00').getMonth()===state.mapMonthFilter);
+  if(state.monthFilter!==null){
+    pts = pts.filter(c => c.dataProssimaManutenzione && new Date(c.dataProssimaManutenzione+'T00:00:00').getMonth()===state.monthFilter);
   }
   if(pts.length===0) return;
   const bounds = [];
@@ -1179,7 +1295,7 @@ function openOnMap(id){
     alert('Nessuna posizione salvata per questo cliente ancora. Riprova tra poco (la geocodifica automatica può richiedere qualche secondo) oppure apri "Modifica scheda" e usa "Verifica posizione ora".');
     return;
   }
-  state.mapMonthFilter = null;
+  state.monthFilter = null;
   state.focusClientId = id;
   state.view = 'map';
   render();
@@ -1216,6 +1332,7 @@ function renderDetail(){
         ` : ''}
       </dl>
       ${c.note ? `<p class="detail-note">${escapeHtml(c.note)}</p>` : ''}
+      ${c.modificatoDa ? `<p class="empty-hint-sm" style="margin-top:10px">Ultima modifica di <strong>${escapeHtml(c.modificatoDa)}</strong> il ${fmtDate(c.modificatoIl)}</p>` : ''}
       <div class="detail-actions">
         <button class="btn btn-primary" onclick="openForm('${c.id}')">${ICON_PENCIL} Modifica scheda</button>
         <button class="btn btn-outline" onclick="generatePDF('${c.id}')">Genera e invia PDF</button>
@@ -1371,10 +1488,10 @@ function headerHtml(){
       <div class="brand">
         <div class="brand-badge"><img src="${ICON_BADGE_SRC}" alt="Icona estintore" /></div>
         <div>
-          <p class="brand-title">Registro Clienti · Estintori <span style="font-size:10px;color:var(--steel);font-weight:400">build 20</span></p>
+          <p class="brand-title">Registro Clienti · Estintori <span style="font-size:10px;color:var(--steel);font-weight:400">build 25</span></p>
         </div>
       </div>
-      ${state.view!=='form' ? `<button class="btn btn-primary btn-sm" onclick="openForm(null)">${ICON_PLUS} Nuovo cliente</button>` : ''}
+      ${state.view!=='form' ? `<div class="header-actions"><button class="btn btn-primary btn-sm" onclick="openForm(null)">${ICON_PLUS} Nuovo cliente</button><button class="btn btn-outline btn-sm" onclick="doLogout()" title="${escapeHtml(state.user&&state.user.email||'')}">${ICON_LOGOUT}</button></div>` : ''}
     </div>
     ${state.view!=='form' ? `
     <nav class="tabs container">
@@ -1396,6 +1513,14 @@ function bodyHtml(){
 }
 function render(){
   try{
+    if(!state.authChecked){
+      document.getElementById('app').innerHTML = '<div class="login-wrap"><p style="color:var(--steel)">Verifica accesso…</p></div>';
+      return;
+    }
+    if(!state.user){
+      document.getElementById('app').innerHTML = renderLogin();
+      return;
+    }
     document.getElementById('app').innerHTML = headerHtml() + bodyHtml();
     if(state.view==='form'){
       renderApparecchiList();
@@ -1424,8 +1549,7 @@ window.addEventListener('unhandledrejection', ev => {
   try{ render(); }catch(e){}
 });
 
-initSync();
-retryPendingWrites();
+render();
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
